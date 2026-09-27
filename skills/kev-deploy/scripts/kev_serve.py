@@ -27,7 +27,7 @@ import time
 import modal
 import modal.experimental
 
-KEV_REF = "f1535963cea021439370c23127bc970b6788e730"   # github.com/jaredpalmer/kev commit whose kev package this endpoint runs
+KEV_REF = "5920c5fe4ca8e0970ed4209ac2c9b8e18bea5109"   # github.com/jaredpalmer/kev commit whose kev package this endpoint runs
 # GPU preference lists (Modal takes the first with capacity), from runs/serve-*/, runs/fused-27b-*/ and runs/serving-*/report.json in the repo.
 # An L4 is enough for the 0.8B but runs out of compute on the 4B; the L40S is the cheapest GPU that answers the 4B in tens
 # of milliseconds, the H100 the fastest for the 4B and 9B. The A100 is slower than the L40S here and costs more. Kev-27B
