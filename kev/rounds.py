@@ -593,6 +593,21 @@ def shipped_temperature(entry, root=ROOT):
 SHIPPED_TOLERANCE = 0.05   # a parent served this far from its shipped temperature, fitted in distribution, is warned about
 
 
+def continuation_warnings(spec, root=ROOT):
+    """Report only: a full-weight study runs longer than one attempt only while something continues it. Its trials spawn
+    with Modal's retries off (kev.budget.FULL_FT_RETRIES says why), so a timed-out trial gets its next attempt from
+    `kev.rounds watch` (modal_app.continue_full_trial), or by hand with modal_app.py::resume --trial; an attached launch
+    keeps no attempt ledger and is never continued."""
+    out = []
+    for name, study in spec.get("studies", {}).items():
+        plan = Path(root) / study.get("plan", "")
+        trials = read_json(plan) if plan.is_file() else []
+        if any(isinstance(t, dict) and t.get("full_ft") for t in (trials if isinstance(trials, list) else [])):
+            out.append(f"study {name} is full-weight: a trial that times out is continued only while `kev.rounds watch` runs (or by hand: "
+                       f"modal_app.py::resume --study {name} --trial <label>); an attached launch (study --detached False) keeps no ledger and is never continued")
+    return out
+
+
 def calibration_warnings(spec, root=ROOT):
     """Report-only warnings that `validate` and `launch` print. (1) For a round before POOL_REQUIRED_FROM without a
     `temperature` pool whose criteria depend on the temperature (from then on it is a problem: pool_required_problems): each
@@ -932,21 +947,27 @@ def continue_command(spec, study, label):
 def continue_trial(spec, study, label, run=subprocess.run):
     """The next attempt of a timed-out trial: modal_app.py::resume --trial (modal_app.continue_full_trial) spawns
     run_full_trial again, which continues from the trial's last resume point, with the GPU and timeout the study was
-    admitted for, and records the call in runs/<study>.spawn.json. Raises NoContinuation when the study's attempt ledger
-    has no attempt left (kev.budget.trial_attempts, the count compute_bound admitted) or the command recorded no new call;
-    output in runs/<study>.continue-<label>-<attempt>.log."""
+    admitted for, and records the call in runs/<study>.spawn.json; for a pending ledger entry it first adopts the call
+    from the trial's lease (or waits). Returns once the record names a new current call (spawned or adopted). Raises
+    NoContinuation when the study has no attempt ledger, when the ledger has no attempt left (kev.budget.trial_attempts,
+    the count compute_bound admitted; a pending last entry is resolved by the command first) or when the command
+    succeeded without recording a call, and RuntimeError when it refused (a live lease, a young pending entry, the
+    network: the watcher asks again on its next pass). Output in runs/<study>.continue-<label>-<attempt>.log."""
     from kev.budget import trial_attempts
     path = ROOT / "runs" / f"{study}.spawn.json"
     record = read_json(path)
-    used, allowed = trial_attempts(record, label)
     if record.get("modal_retries") != 0: raise NoContinuation(f"{path.name} has no attempt ledger (spawned with Modal's retries on, before the ledger)")
-    if used >= allowed: raise NoContinuation(f"{used} of {allowed} attempts used; the admission bound (${record.get('bound_usd')}) counts no more")
+    used, allowed = trial_attempts(record, label)
+    last = record["attempts"][label][-1]
+    if used >= allowed and (last["call"] is not None or last.get("abandoned")):
+        raise NoContinuation(f"{used} of {allowed} attempts used; the admission bound (${record.get('bound_usd')}) counts no more")
     log = ROOT / "runs" / f"{study}.continue-{label}-{used + 1}.log"
     print("continue:", " ".join(continue_command(spec, study, label)), "->", log.relative_to(ROOT), flush=True)
-    with log.open("w", encoding="utf-8") as f:
-        run([sys.executable, "-m", *continue_command(spec, study, label)], stdout=f, stderr=subprocess.STDOUT, cwd=ROOT, env=modal_env(spec), check=True)
-    if read_json(path)["calls"][label] == record["calls"][label]:
-        raise NoContinuation(f"modal_app.py::resume recorded no new call (see {log.relative_to(ROOT)})")
+    with log.open("a", encoding="utf-8") as f:
+        done = run([sys.executable, "-m", *continue_command(spec, study, label)], stdout=f, stderr=subprocess.STDOUT, cwd=ROOT, env=modal_env(spec))
+    if read_json(path)["calls"][label] != record["calls"][label]: return
+    if getattr(done, "returncode", 0): raise RuntimeError(f"modal_app.py::resume --trial exited {done.returncode} without a new call (see {log.relative_to(ROOT)})")
+    raise NoContinuation(f"modal_app.py::resume recorded no new call (see {log.relative_to(ROOT)})")
 
 
 # --- watch -----------------------------------------------------------------------------------------------------------
@@ -979,7 +1000,8 @@ class NoContinuation(Exception):
 
 
 def poll_modal(call_id):
-    """'running' | 'done' | 'timeout' (the call ran out of time: its container was cancelled at the timeout) for a spawned
+    """'running' | 'done' | 'timeout' (the call ran out of time: its container was cancelled at the timeout) | 'refused'
+    (a full-weight attempt that found another attempt's fresh lease and did not start: modal_app.TrialLease) for a spawned
     trial; the trial's exception (or a network error) propagates, and a returned failure is raised as TrialFailed."""
     import modal
     try:
@@ -991,6 +1013,7 @@ def poll_modal(call_id):
     except modal.exception.OutputExpiredError:   # finished long ago; the result is on the volume
         return "done"
     if isinstance(result, dict) and "failed" in result: raise TrialFailed(result["failed"])
+    if isinstance(result, dict) and "refused" in result: return "refused"
     return "done"
 
 
@@ -1013,7 +1036,9 @@ def watch_studies(studies, on_done, poll=poll_modal, interval=120, max_transient
     raises NoContinuation, the timeout is the trial's failure; any other error from it is retried on the next pass
     (max_transient in a row marks the trial failed). `continuing_at` is written before on_timeout runs; a restart that
     finds it and a changed call adopts the call, one that finds the call unchanged asks again (modal_app.continue_full_trial
-    refuses a second attempt while one runs and counts every attempt in the ledger)."""
+    refuses a second attempt while one runs, waits for the old container's lease and counts every attempt in the ledger).
+    A call refused by the trial's lease, and a current attempt with no call recorded (a pending ledger entry), go to
+    on_timeout the same way."""
     runs = Path(root) / "runs"
     while True:
         settled = True
@@ -1026,7 +1051,9 @@ def watch_studies(studies, on_done, poll=poll_modal, interval=120, max_transient
                 if s.setdefault("call", call_id) != call_id and s["status"] != "done":   # the trial's next attempt
                     log(f"{study}/{label}: polling its continuation {call_id} (was {s['call']})")
                     s.update(call=call_id, status="running", transient=0); s.pop("error", None); s.pop("continuing_at", None)
-                if s["status"] == "running":
+                if s["status"] == "running" and call_id is None:   # a pending ledger entry: spawned, or about to be, with no call recorded
+                    s["status"] = "timeout"; log(f"{study}/{label}: no call recorded for its current attempt (pending); a continuation adopts it from its lease or waits")
+                elif s["status"] == "running":
                     try:
                         s["status"], s["transient"] = poll(call_id), 0
                     except Exception as error:   # noqa: BLE001 - a trial's own failure or this machine's network, told apart here
@@ -1034,6 +1061,8 @@ def watch_studies(studies, on_done, poll=poll_modal, interval=120, max_transient
                             s["transient"] += 1; log(f"{study}/{label}: network error, retrying ({type(error).__name__}: {str(error)[:120]})")
                         else:
                             s["status"], s["error"] = "failed", f"{type(error).__name__}: {str(error)[:300]}"; log(f"{study}/{label}: FAILED {s['error']}")
+                if s["status"] == "refused":   # the attempt found another attempt's fresh lease and never started: it needs a next attempt too
+                    s["status"] = "timeout"; log(f"{study}/{label}: its call {call_id} was refused by the trial's lease (another attempt's container was alive)")
                 if s["status"] == "timeout":
                     if on_timeout is None:
                         s["status"], s["error"] = "failed", "FunctionTimeoutError (not continued: no on_timeout)"; log(f"{study}/{label}: FAILED {s['error']}")
@@ -1141,7 +1170,7 @@ def main(argv=None):
         if name in ("readout", "confirm"): p.add_argument("--out")
     a = ap.parse_args(argv)
     spec, root = load(a.spec), Path(getattr(a, "root", ROOT))
-    for line in calibration_warnings(spec, root) if a.cmd in ("validate", "launch") else ():
+    for line in [*calibration_warnings(spec, root), *continuation_warnings(spec, root)] if a.cmd in ("validate", "launch") else ():
         print(f"!!! warning: {line}")
     if a.cmd == "validate":
         problems, archived = validate(spec, root, partitions=a.partitions)

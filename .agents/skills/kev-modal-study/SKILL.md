@@ -75,7 +75,8 @@ log; all three skip names that already exist locally / on the volume.
   trial. Modal's retries are off (it charged a killed timed-out attempt twice: `scripts/modal_retry_probe.py`); a timed-out
   trial is continued by `kev.rounds watch` through `modal_app.py::resume --trial <label>` (`modal_app.continue_full_trial`:
   a new call, only after the last one ended by a timeout, counted in `runs/<study>.spawn.json`'s `attempts`, with the
-  study's GPU and timeout), which continues from its last resume point (`kev.experiment.continue_trial`);
+  study's GPU and timeout; the attempt is recorded pending before its spawn, and it waits for the old attempt's lease on the
+  `kev-leases` volume to end or go stale, `kev.budget.LEASE_STALE`), which continues from its last resume point (`kev.experiment.continue_trial`);
   the container commits the volume after each completed resume point (`modal_app.commit_resume_points`; proof:
   `runs/sft-resume-e2e-*`); an attempt that fails with an error writes `failed.json` and returns `{"failed": ...}`
   (never continued; the watcher reports it). The bound counts every attempt, so an 8 x H200 day is

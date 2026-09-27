@@ -95,7 +95,7 @@ Title Case sections, API tables, Authors + License); model cards are formal.
   round 22's trial two of its three attempts (`scripts/modal_retry_probe.py`); `runs/<study>.spawn.json` is the attempt
   ledger (`calls` = each trial's current call, `attempts` = all of them), and `modal_app.py::resume --trial <label>`
   (`modal_app.continue_full_trial`, what `watch` runs) spawns the next attempt only after a call ended by a timeout,
-  within the ledger, with the study's GPU and timeout; `--beyond-bound` continues a trial without a ledger, uncounted.
+  within the ledger, with the study's GPU and timeout; `--beyond-bound` continues a trial without a ledger, uncounted. Each attempt is written to the ledger pending (a nonce) before its spawn; a pending entry blocks continuations until its call is adopted from the lease or it is `kev.budget.LEASE_STALE` old. The lease: every full-weight attempt holds `<study>/<trial>/attempt.json` on the `kev-leases` volume (`modal_app.TrialLease`: nonce, attempt, call id, heartbeat every `LEASE_HEARTBEAT` s from its own thread, marked ended on a clean exit); an attempt that finds another attempt's lease fresher than `LEASE_STALE` (900 s) returns `{"refused": ...}` without touching the trial, and `continue_full_trial` waits (bounded) for the old lease to end or go stale, so a continuation starts only after the old container is gone.
   It also keeps snapshots at `experiment.SNAPSHOT_FRACTIONS` (0.25, 0.5, 0.75 of its optimizer steps) in
   `<trial>/snapshots/step-<N>/checkpoint` (plan keys `snapshot_fractions` (a string, `"none"` for none) and
   `snapshot_every_steps`, which needs `max_steps` so `validated_trial` can check `MAX_SNAPSHOTS`; neither changes the

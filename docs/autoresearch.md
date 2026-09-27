@@ -161,6 +161,9 @@ and move to the next arm. Do not wait for a human.
   (the timeout, then the task it killed 30 s later), so `Retries(2)` gave round 22's trial two of its three attempts, and
   the kill's retry can start beside a running attempt (`scripts/modal_retry_probe.py`). A study spawned before the ledger
   has no count: `resume --trial <label> --beyond-bound` continues it by hand, outside any bound, and says so.
+  Two attempts never share a trial: each is recorded pending before its spawn, and each holds a lease on the `kev-leases`
+  volume (heartbeat every minute); a new attempt refuses while another's lease is fresh, and a continuation waits up to
+  `kev.budget.LEASE_STALE` (15 min) after a killed attempt's last heartbeat before it spawns.
 - **Network drops** kill local clients, not the remote work: a read whose client died has usually finished on Modal; pull
   its directory from the volume (`modal volume get kev-runs /<name> runs/<name>`) instead of relaunching it.
 - A failed benchmark or probe leaves its directory on the volume; retry under a new name.

@@ -161,9 +161,11 @@ def test_watcher_gives_up_after_max_transient(tmp_path):
 
 
 def _ledger(tmp_path, attempts, full_ft=True):
-    """A spawn record with the attempt ledger (modal_app.launch_detached): trial-0's calls so far, the last one current."""
+    """A spawn record with the attempt ledger (modal_app.launch_detached): trial-0's attempts so far (call ids; None = a
+    pending entry, written before a spawn whose call was never recorded), the last one current."""
     (tmp_path / "runs").mkdir(exist_ok=True)
-    write_json(tmp_path / "runs/s.spawn.json", {"name": "s", "calls": {"trial-0": attempts[-1]}, "attempts": {"trial-0": list(attempts)}, "bound_usd": 987.99,
+    entries = [{"nonce": f"n{i}", "call": c, "at": 0.0} for i, c in enumerate(attempts)]
+    write_json(tmp_path / "runs/s.spawn.json", {"name": "s", "calls": {"trial-0": attempts[-1]}, "attempts": {"trial-0": entries}, "bound_usd": 987.99,
                                                 "gpu": "H200:8", "timeout": 28800, "full_ft": full_ft, "modal_retries": 0})
 
 
@@ -171,7 +173,7 @@ def _continue(tmp_path, new_call):
     """A fake on_timeout: what modal_app.continue_full_trial does to the ledger (the next attempt becomes the current call)."""
     def on_timeout(study, label):
         record = read_json(tmp_path / f"runs/{study}.spawn.json")
-        record["attempts"][label].append(new_call); record["calls"][label] = new_call
+        record["attempts"][label].append({"nonce": new_call, "call": new_call, "at": 0.0}); record["calls"][label] = new_call
         write_json(tmp_path / f"runs/{study}.spawn.json", record)
     return on_timeout
 
@@ -231,12 +233,13 @@ def test_a_restarted_watcher_adopts_a_continuation_it_did_not_see(tmp_path):
 
 
 def test_continue_trial_counts_attempts_against_the_admission_bound(tmp_path, monkeypatch):
+    from types import SimpleNamespace
     from kev.budget import FULL_FT_RETRIES, trial_attempts
     monkeypatch.setattr(rounds, "ROOT", tmp_path)
     spec = {"studies": {"s": {"suite": "evals/sft-v2-r22", "transfer": "evals/v4/transfer-v4", "gpu": "H200:8", "timeout": 28800}}, "app": "kev-sft"}
     ran = []
     def run(cmd, **kw):   # modal_app.py::resume --trial: spawns and records the next call
-        ran.append(cmd[cmd.index("--trial") + 1]); _continue(tmp_path, f"fc-{len(ran)}")("s", "trial-0")
+        ran.append(cmd[cmd.index("--trial") + 1]); _continue(tmp_path, f"fc-{len(ran)}")("s", "trial-0"); return SimpleNamespace(returncode=0)
     _ledger(tmp_path, ["fc-0"])
     rounds.continue_trial(spec, "s", "trial-0", run=run)
     rounds.continue_trial(spec, "s", "trial-0", run=run)
@@ -245,16 +248,45 @@ def test_continue_trial_counts_attempts_against_the_admission_bound(tmp_path, mo
     with pytest.raises(rounds.NoContinuation, match="3 of 3 attempts used"): rounds.continue_trial(spec, "s", "trial-0", run=run)
     assert len(ran) == 2   # nothing spawned past the bound
     _ledger(tmp_path, ["fc-0"])
-    with pytest.raises(rounds.NoContinuation, match="recorded no new call"): rounds.continue_trial(spec, "s", "trial-0", run=lambda cmd, **kw: None)
+    with pytest.raises(rounds.NoContinuation, match="recorded no new call"): rounds.continue_trial(spec, "s", "trial-0", run=lambda cmd, **kw: SimpleNamespace(returncode=0))
+    with pytest.raises(RuntimeError, match="exited 1"): rounds.continue_trial(spec, "s", "trial-0", run=lambda cmd, **kw: SimpleNamespace(returncode=1))   # a refusal: asked again
+    _ledger(tmp_path, ["fc-0", "fc-1", None])   # the third attempt is pending: the command resolves it (adopts its call from the lease) before any budget verdict
+    def adopt(cmd, **kw):
+        record = read_json(tmp_path / "runs/s.spawn.json"); record["attempts"]["trial-0"][-1]["call"] = record["calls"]["trial-0"] = "fc-2"
+        write_json(tmp_path / "runs/s.spawn.json", record); return SimpleNamespace(returncode=1)   # adopted, then refused to spawn: it is running
+    rounds.continue_trial(spec, "s", "trial-0", run=adopt)
+    assert read_json(tmp_path / "runs/s.spawn.json")["calls"]["trial-0"] == "fc-2"
     _ledger(tmp_path, ["fc-0"], full_ft=False)   # a LoRA trial has one attempt
     with pytest.raises(rounds.NoContinuation, match="1 of 1"): rounds.continue_trial(spec, "s", "trial-0", run=run)
     write_json(tmp_path / "runs/s.spawn.json", {"name": "s", "calls": {"trial-0": "fc-0"}, "bound_usd": 987.99, "timeout": 28800})   # round 22's record
     with pytest.raises(rounds.NoContinuation, match="no attempt ledger"): rounds.continue_trial(spec, "s", "trial-0", run=run)
 
 
+def test_the_watcher_continues_refused_and_pending_attempts(tmp_path):
+    """A call the trial's lease refused never started, and a current attempt with no recorded call (a pending ledger
+    entry) may or may not have: both go to on_timeout, which resolves them against the ledger and the lease."""
+    _ledger(tmp_path, ["fc-0"])
+    script = {"fc-0": ["refused"], "fc-1": ["done"]}
+    asked = []
+    def on_timeout(study, label): asked.append(label); _continue(tmp_path, "fc-1")(study, label)
+    rounds.watch_studies(["s"], lambda *a: None, poll=lambda cid: script[cid].pop(0), sleep=lambda s: None, log=lambda m: None, root=tmp_path, on_timeout=on_timeout)
+    assert asked == ["trial-0"] and read_json(tmp_path / "runs/s.watch.json")["calls"]["trial-0"]["call"] == "fc-1"
+    (tmp_path / "runs/s.watch.json").unlink(); _ledger(tmp_path, [None]); asked.clear()
+    polled = []
+    rounds.watch_studies(["s"], lambda *a: None, poll=lambda cid: polled.append(cid) or "done", sleep=lambda s: None, log=lambda m: None, root=tmp_path, on_timeout=on_timeout)
+    assert asked == ["trial-0"] and polled == ["fc-1"]   # None is never polled
+
+
+def test_full_weight_studies_warn_that_the_watcher_continues_them(tmp_path):
+    (tmp_path / "plan.json").write_text('[{"full_ft": 1}]', encoding="utf-8"); (tmp_path / "lora.json").write_text('[{"lora": 16}]', encoding="utf-8")
+    spec = {"studies": {"full": {"plan": "plan.json"}, "lora": {"plan": "lora.json"}}}
+    [line] = rounds.continuation_warnings(spec, tmp_path)
+    assert line.startswith("study full is full-weight") and "kev.rounds watch" in line and "attached" in line
+
+
 def test_trial_attempts_reads_the_ledger():
     from kev.budget import FULL_FT_RETRIES, trial_attempts
-    full = {"calls": {"t": "b"}, "attempts": {"t": ["a", "b"]}, "full_ft": True, "modal_retries": 0}
+    full = {"calls": {"t": "b"}, "attempts": {"t": [{"nonce": "x", "call": "a"}, {"nonce": "y", "call": "b"}]}, "full_ft": True, "modal_retries": 0}
     assert trial_attempts(full, "t") == (2, 1 + FULL_FT_RETRIES)
     assert trial_attempts({**full, "attempts": {}}, "t") == (1, 1 + FULL_FT_RETRIES)   # no list yet: the current call is the one attempt
     assert trial_attempts({**full, "full_ft": False}, "t") == (2, 1)
@@ -271,6 +303,8 @@ def test_poll_modal_reports_a_timeout(monkeypatch):
                           (modal.exception.OutputExpiredError(), "done")):
         monkeypatch.setattr(modal.FunctionCall, "from_id", lambda cid, e=error: Call(e))
         assert rounds.poll_modal("fc-0") == status
+    monkeypatch.setattr(modal.FunctionCall, "from_id", lambda cid: type("C", (), {"get": lambda self, timeout: {"label": "trial-0", "refused": "attempt 1 holds the trial"}})())
+    assert rounds.poll_modal("fc-0") == "refused"
 
 
 def test_transient_errors_are_network_errors_only():
