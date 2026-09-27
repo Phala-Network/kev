@@ -139,13 +139,16 @@ Title Case sections, API tables, Authors + License); model cards are formal.
   (`kev.metrics.calibration_by_length`: under_8k, 8k_16k, 16k_32k, 32k_64k, 64k_plus and the tails 8k_plus/16k_plus/32k_plus;
   tokens = the encoded state segment, `<state>` included, as `kev.model.encode` builds it and `kev.serve` reports it, counted from the reads' suite records with `kev.suite.ADMISSION_TOKENIZER` unless given), and a criterion may read a
   bucket (`long.ece_16k_plus.candidate <= 0.05`). An arm may be a checkpoint without a trial (`"checkpoint": "/runs/..."`, its "transfer" rows
-  from a `transfer_read`), e.g. a WiSE-FT interpolation (`scripts/interpolate_checkpoint.py`, `modal_app.py::interpolate`);
+  from a `transfer_read`), e.g. a WiSE-FT interpolation (`scripts/interpolate_checkpoint.py`, `modal_app.py::interpolate`: with the
+  base, or `--toward` another checkpoint of the same base and revision, full weights or a LoRA merged in fp32, `--blend_head` to blend the
+  pointer heads too; round 23);
   deltas are `kev.rounds.paired` (2,000 resamples, seed 0, micro). Rounds 5-18 are recorded specs (`"archive": "research-archive-2026-09-24"`): their plans, reads, data builders
   and per-round scripts live on that git tag, not on main; `validate` lists what this checkout lacks instead of failing, and
   `launch`/`watch`/`launch-reads` refuse a recorded round (a new round is a new spec, without `archive`, and must have its plans
   and parents' reads). `tests/test_rounds.py` reproduces the committed read-outs of rounds 5-18 and verdicts of 8/10/11/12/15
   exactly; offline (CI) it runs round 5's read-out, round 15's locked verdict and round 20's six interpolated arms, whose rows are on main; round 19's read-out
-  (and round 20's whole read-out) runs where the private dataset is readable (its trials' `sft-v1` development rows: `scripts/private_rows.py`); every other case
+  (and round 20's whole read-out, and round 22's) runs where the private dataset is readable (round 19's trials' `sft-v1` development rows;
+  round 22's tasksource-heldout reads and ood / agents / guardrails rows: `scripts/private_rows.py`); every other case
   skips unless `KEV_ROUNDS_ROOT` points at a checkout with the archived rows and outputs (the research checkout, or a worktree
   of the tag plus its gitignored trial rows). `kev.autoresearch
   session <specs> --spend-start X --spend-cap Y` runs registered rounds to their read-outs under a spend cap and never confirms;

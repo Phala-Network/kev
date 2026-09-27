@@ -1,5 +1,5 @@
 """The round harness (kev.rounds): spec validation, the benchmark job codec, the watcher's resume and network handling, and
-reproduction of the committed read-outs and verdicts of rounds 5-20 from saved rows, and round 20's temperature pools,
+reproduction of the committed read-outs and verdicts of rounds 5-20 and 22 from saved rows, and round 20's temperature pools,
 transfer reads and checkpoint arms on a synthetic round; the calibration guards (a temperature pool that shares data with
 an arm's training is refused, every arm's temperature source is recorded, scripts/calibrate_checkpoint.py refuses
 in-distribution rows) and calibration by state length.
@@ -410,6 +410,23 @@ def test_readout_reproduces_round_20():
     assert len(interpolated) == 6
     assert same({a: report["arms"][a] for a in interpolated}, {a: committed["arms"][a] for a in interpolated})
     assert report["ranking"] == committed["ranking"] and report["candidates"] == committed["candidates"] == {"27b": None}
+
+
+def test_readout_reproduces_round_22():
+    """Round 22 was read out by this harness (no candidate). Its public-suite reads are committed; every tasksource-heldout-v1
+    read (rows and report name the private families) and the ood-v2 / agents-ood-v1 / guardrails-ood-v1 rows, round 21's
+    parent reads included, come from the private dataset (scripts/private_rows.py), and longdoc-v1's state lengths from the
+    private evaluation mirror: the test skips for an account without access. Every arm is served at its pool temperature."""
+    from scripts.private_rows import restore
+    try:
+        restore("runs/r22-readout/private-rows.json", ROOT)
+    except PermissionError as error:
+        pytest.skip(str(error))
+    spec = rounds.load(ROOT / "experiments/rounds/r22.json")
+    report = rounds.readout(spec, ROOT)
+    assert same(report, read_json(ROOT / "runs/r22-readout/round22.json"))
+    assert all(r["temperature_source"]["kind"] == "pool" and r["temperature_source"]["questions"] == 648 for r in report["arms"].values())
+    assert report["candidates"] == {"27b": None} and "!!!" not in rounds.table(report)
 
 
 # --- temperature pools, transfer reads and checkpoints without a trial (round 20) -------------------------------------
