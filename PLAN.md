@@ -850,6 +850,133 @@ for 1140 steps (--accum 2); the plan's largest pass ... of --pass_tokens_max 409
 per step (projected; 45-47 s anchored to the probe); (3) as snapshots land, `launch-reads experiments/rounds/r22.json --arms
 <arm>` one candidate at a time (the budget table), reading the metered cost before each; (4) read-out, then confirmation as written. What may be committed: as round 21.
 
+## Round 24 (registered)
+
+### Round 24 - retrospective selection: the audit's verdicts as one rule, applied to every full-weight 27B checkpoint (registered with this spec's commit, written before any computation under it)
+
+**What this is, plainly.** This is **post hoc selection** among checkpoints that already exist and have already been read
+on development data: round 19's two finals, round 20's six WiSE-FT blends and round 22's three snapshots and final (12
+checkpoints; no training, no new development read). Their own rounds' verdicts stand as registered: rounds 19, 20 and 22
+each selected no candidate, and nothing here revises them. The rule below is the 2026-09-27 evaluation-suite audit's
+verdicts (report `audit/REPORT.md` in the audit worktree at `9c41005`; read-only, $6.68 of blind second-opinion spend)
+applied uniformly: every suite the round rules read was scored against the same nine criteria (learnability, label noise,
+seed noise, reliability, discrimination, power, saturation, contamination, redundancy), whether the SFT checkpoints pass
+it or fail it, and each fix below is that audit's verdict for its suite. It is frozen in this commit before any
+checkpoint's result under it is computed. It is not blind: the audit read these checkpoints' development rows (its
+master table and its post-hoc what-ifs for round 22, e.g. round 22's final: short state without `emotion` −0.88 [−1.95,
++0.19], breadth learnable +1.54 [+0.57, +2.47], tasksource-heldout without the seven families +4.06 [+2.31, +5.77]), so
+whoever reads this knows roughly where round 22's candidates fall. Selecting the best of 12 on development panels is
+optimistic by construction. The guard against that optimism is the confirmation: untouched test partitions of breadth-v1,
+tasksource-heldout-v1, hard-v1, devtools-v1, documents-v1, documents-v2 and longdoc-v1, and the locked transfer-v4 read,
+each read once, for the named candidate only, under the same exclusions.
+
+**Why the rule changes** (the audit's numbers; "P0" = the chance that a candidate exactly as good as Kev-27B fails the
+registered bar, from round 22's half-widths):
+- *scienthoon-v1*: removed (being removed from the repo separately). The blind reader agrees with gold on 1 of 45
+  all-wrong items; round 22's final's −5.5 pp is 32 of 48 net questions on `priority`, whose label no text determines;
+  Kev-27B sits +3.1 pp above its six LoRA siblings and 3 of the 5 others fail the −4 pp guard against it.
+- *WANLI-v2*: report only. Split-half r 0.04 across 23 checkpoints (all within 0.735-0.763); half-width 1.95-2.10 pp
+  against a 2 pp bar, P0 48-54 %; ~11 % invalid labels.
+- *pooled externals*: removed. Without scienthoon it is 81 % WANLI (τ 0.75), split-half r 0.08. SemIf (saturated: best
+  0.993, 90 % of items right for every checkpoint; 144 questions) and TypeSafe (gold = a reference argmax; 89 questions,
+  split-half r −0.27) are reported.
+- *`emotion`* (transfer-v4 dev and transfer-r3 test): dropped from the short-state and Kev panels. Keyword distant
+  supervision: 26 % / 28 % of items wrong for every checkpoint, and the blind reader sides with gold on 2 of 21 / 1 of 25.
+  It stays in the temperature pool: dropping it there alone moves T to 1.23 and worsens breadth ECE (0.020 → 0.028).
+- *short-state Brier*: the +0.01 bar has P0 36-55 % (half-width 0.85-1.07 pp). The audit's recommendation is a margin the
+  half-width can resolve, "e.g. Brier upper ≤ +0.02", and P(fail | Δ = 0) ≤ 10 %; at +0.02 that is ≈ 0.4-4.5 % from the
+  same half-widths (bar − half-width over half-width / 1.96). Registered: upper ≤ +0.02. Confident errors keep +1 pp
+  (P0 13-22 %), as specified.
+- *breadth-v1*: `routerbench` dropped (asks which model answered correctly with no answers in the state: 44 % all-wrong,
+  accuracy at the prior); `cfcolor`, `humicroedit` (chance for every system, Jev included) and `chessbench` (floor, 54 %
+  all-wrong) moved to report. Split-half r 0.41 → 0.57.
+- *tasksource-heldout-v1*: seven families dropped, coded T11 T12 T14 T15 T18 T22 T24 (all-wrong 21-55 %, blind reader with
+  gold on ≤ 25 %; invalid labels, 2-way → 3-way mappings, lost span markup, shuffled-word NLI, preference without its
+  criterion; 795 of 2,788 development questions). The names are private (the family list is), so the panel reads a private
+  exclusion file registered by path and sha256 (below).
+- *devtools-v1*: `flakeflagger` (labels from reruns not visible in the code; 3 development projects) and commitpackft
+  `change_type` (task `commitpackft_type`: a verb heuristic on a commit message the state does not show; 24 % all-wrong,
+  blind reader with gold on 1 of 25) dropped from the Kev panel.
+- *longdoc CUAD*: accuracy tripwires kept (P0 1-18 %); ECE 16k+ report only (80 % of the final's 206 confident errors sit on
+  wrong, non-unique or disputed gold; the gap is real but the question set needs a rebuild). The generated half (1.000 for
+  every checkpoint) and ood-v2 / agents-ood-v1 / guardrails-ood-v1 (sound labels but near ceiling and the SFT components'
+  own generators) are reported. hard-v1 (exact labels, but its train templates are in the SFT corpora and it carries +191 of
+  round 22's final's +291 net Kev-panel questions) stays inside the Kev retention gate and is also reported alone and as
+  the Kev panel without it.
+- Not adopted from the audit's prospective recommendations (they need new reads or new suite versions): intervals and
+  wider margins on the ECE criteria (their sampling sd is 0.006-0.010 against a 0.01 margin; the ECE deltas' paired
+  intervals are reported), gating against the LoRA sibling family, and one sibling read per suite.
+
+**Candidates** (spec `experiments/rounds/r24.json`; all selectable; each a checkpoint arm on the `kev-runs` volume with
+`trained_on` its training suite, so the pool check covers it; parent Kev-27B, `r6-27b-v2/01-trial-1`, with the reads rounds
+21-22 used):
+
+| arm | checkpoint | trained on | its development reads |
+|---|---|---|---|
+| `27b-r19a`, `27b-r19b` | round 19 (a) lr 2e-6 / (b) lr 5e-6 finals, `/runs/r19-27b-{lr2e6,lr5e6}/00-trial-0/checkpoint` | `evals/sft-v1` | `runs/r19-27b-*-<tag>`; transfer-v4 dev = the trials' in-trial transfer read; `r3cal` from round 20; tasksource-heldout, longdoc and the three OOD suites from the 2026-09-27 sweep (`runs/sweep-r19-{a,b}-<tag>`) |
+| `27b-r20{a,b}-w{85,70,50}` | round 20 blends, `/runs/r20-wise/27b-{a,b}-w{85,70,50}/checkpoint` | `evals/sft-v1` | `runs/r20-27b-*-<tag>` (incl. `transfer4`, `r3cal`); the sweep's `runs/sweep-r20-*-<tag>` |
+| `27b-r22-s25`, `-s50`, `-s75`, `-final` | round 22 snapshots at steps 285 / 570 / 855 and the final, `/runs/r22-27b-lr2e6/00-trial-0/...` | `evals/sft-v2-r22` | round 22's 17 reads each (`runs/r22-27b-lr2e6[-sNN]-<tag>`) |
+
+The sweep made the development reads the round-19/20 checkpoints lacked (tasksource-heldout, longdoc, ood-v2,
+agents-ood-v1, guardrails-ood-v1; `/runs/<checkpoint>` through `modal_app.py::benchmarks`, raw logits), before this
+registration and without a rule. A candidate missing any gating read is incomplete and is never selected; report-only
+panels are marked `optional` and never make a candidate incomplete.
+
+**Temperature.** Round 20-23's pool, unchanged: transfer-r3 calibration's eight held-out sources + transfer-v9 MMLU-Pro
+(648 questions), minus transfer-v4 dev records; Kev-27B at its shipped 1.38. New, report only (the audit: the final's T
+1.382 has a 90 % CI [1.20, 1.52] and breadth ECE moves 0.020 → 0.031 across it): each candidate's 90 % bootstrap
+interval of its pooled T, 2,000 resamples of the pool's (source, record) clusters within each source, seed 0, the same
+121-point grid and objective (`temperature.ci`).
+
+**Rule** (against Kev-27B; paired record-clustered bootstraps, 2,000 resamples, seed 0, micro; `drop_ids` as before):
+1. primaries: breadth-v1 dev accuracy lower > 0 without `routerbench`, `cfcolor`, `humicroedit`, `chessbench`;
+   tasksource-heldout-v1 dev accuracy lower > 0 without the seven families; Kev panel (transfer-v4 dev without `emotion`,
+   hard-v1, devtools-v1 without `flakeflagger` and `commitpackft_type`, documents-v1) accuracy lower ≥ −1 pp;
+2. guards: short state (transfer-v4 dev + transfer-r3 test, both without `emotion`) accuracy lower ≥ −2 pp, Brier upper ≤
+   +0.02, confident errors upper ≤ +1 pp; unknowable share on transfer-v9 ≤ 0.05; longdoc CUAD accuracy lower ≥ −2 pp and
+   CUAD 16k+ accuracy candidate − Kev-27B ≥ −2 pp (as round 22);
+3. calibration: breadth, Kev-panel and tasksource-heldout ECE ≤ Kev-27B's + 0.01 (same exclusions);
+4. candidate: the passing checkpoint with the largest breadth + tasksource-heldout + Kev-panel accuracy gain.
+
+Report only (no gate): SemIf, WANLI-v2, TypeSafe; CUAD ECE by length (16k+ included); longdoc generated; ood-v2,
+agents-ood-v1, guardrails-ood-v1; hard-v1 alone; the Kev panel without hard-v1; breadth over all 14 sources (the
+index's composition) and over the three moved sources; tasksource-heldout over all 24 families; the chance-corrected
+breadth index (`scripts/breadth_report.py`). No pooled-externals guard; scienthoon is not read.
+
+**The private exclusion list.** `runs/r24-private/tsheld-exclude.json` (gitignored): the seven family sources plus a
+random salt (so the public sha256 cannot be matched against guessed lists), registered in the spec as `{path, sha256}`
+(`a72030ab…`) and uploaded to `jaredpalmer/kev-private-train` under `runs/r24/` (manifest
+`runs/r24-readout/private-exclude.json`; `scripts/private_rows.py restore`). `kev.rounds` refuses a file whose hash
+differs and reports the panel missing without it.
+
+**Harness** (this PR): panel filters `exclude_sources`, `exclude_tasks`, `exclude_file` and `source` as a list
+(`kev.rounds.panel_filter`: the same rows leave both sides and any `versus` reference; the panel records `excluded`);
+`optional` report-only panels; `temperature.ci`. Specs without these keys compute exactly as before
+(`tests/test_rounds.py` reproduces rounds 5-20).
+
+**Confirmation** (the named candidate only, each read once, as `docs/autoresearch.md` says; none if no candidate):
+- `tests`: breadth-v1 test accuracy lower > 0 (same four sources out; all 14 reported), with Jev and AutoJev read once on
+  the same test items (report; `kev.jev`, AutoJev's server, `scripts/breadth_report.py`); tasksource-heldout-v1 test lower
+  > 0 (same seven families out); pooled hard-v1 + devtools-v1 (without `flakeflagger`, `commitpackft_type`) +
+  documents-v1 test lower ≥ −1 pp; documents-v2 and longdoc-v1 test (CUAD by length, generated) reported. Kev-27B's side
+  is read once too (`runs/r24c-27b-parent-<tag>`; no 27B test read of these suites exists).
+- `locked`: locked transfer-v4 accuracy ≥ 0.886 and served Brier ≤ 0.165 (`kev-27b-r24-ungated`).
+- Before any release: the bf16 serving check (`modal_app.py::serving --run <checkpoint> --gpu H200 --name serving-27b-r24
+  --flags=--isolation`: max |Δp| ≤ 0.03, ≤ 1 flip in 280) and the long-state run at 8k / 32k / 64k (`--flags "--state_tokens
+  8192,32768,65536 --reps 3"`, served vs benchmark agreement per length, same bars); release temperature = the pool fit
+  written by `scripts/calibrate_checkpoint.py --rows <r3cal rows>:composition_holdout,emotion,legacy_holdout,mmlu,paws,qnli,sciq,tweet_offensive
+  --rows <v9 rows>:mmlu_pro --exclude_rows <transfer4 rows>`.
+
+**Budget.** The rule stage costs nothing (existing reads; the sweep's reads were made and paid for separately). Confirmation,
+candidate only: tests 14 reads × $25.06 (H200, 4 h bound) = $350.85 bound (~$60 expected), locked ~$25, serving check ~$6,
+Jev on breadth-v1 test through the AI Gateway (~$0.10, cap $3).
+
+**Run steps.** (1) Put the reads in place: the round-22 and round-21 parent reads from the round-22 checkout (public rows
+committed with the read-out, private ones restored from `jaredpalmer/kev-private-train`), the sweep's reads copied to
+`runs/sweep-<checkpoint>-<tag>`; (2) `uv run python -m kev.rounds validate experiments/rounds/r24.json`; (3) `uv run python -m
+kev.rounds readout experiments/rounds/r24.json`; (4) confirmation by Jared, if there is a candidate. Committed: the
+read-out, the public rows it scores, and a private-rows manifest for the tasksource-heldout and OOD rows.
+
 ## Next
 
 Goals and open questions, not registered rounds; each becomes a spec and a PLAN section before it runs.
