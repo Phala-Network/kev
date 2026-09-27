@@ -924,6 +924,31 @@ def pull(study, spec):
     subprocess.run([sys.executable, "-m", "modal", "run", "modal_app.py::pull", "--name", study], check=True, cwd=ROOT, env=modal_env(spec))
 
 
+def continue_command(spec, study, label):
+    s = spec["studies"][study]
+    return ["modal", "run", "modal_app.py::resume", "--study", study, "--suite", s["suite"], "--transfer", s["transfer"], "--trial", label]
+
+
+def continue_trial(spec, study, label, run=subprocess.run):
+    """The next attempt of a timed-out trial: modal_app.py::resume --trial (modal_app.continue_full_trial) spawns
+    run_full_trial again, which continues from the trial's last resume point, with the GPU and timeout the study was
+    admitted for, and records the call in runs/<study>.spawn.json. Raises NoContinuation when the study's attempt ledger
+    has no attempt left (kev.budget.trial_attempts, the count compute_bound admitted) or the command recorded no new call;
+    output in runs/<study>.continue-<label>-<attempt>.log."""
+    from kev.budget import trial_attempts
+    path = ROOT / "runs" / f"{study}.spawn.json"
+    record = read_json(path)
+    used, allowed = trial_attempts(record, label)
+    if record.get("modal_retries") != 0: raise NoContinuation(f"{path.name} has no attempt ledger (spawned with Modal's retries on, before the ledger)")
+    if used >= allowed: raise NoContinuation(f"{used} of {allowed} attempts used; the admission bound (${record.get('bound_usd')}) counts no more")
+    log = ROOT / "runs" / f"{study}.continue-{label}-{used + 1}.log"
+    print("continue:", " ".join(continue_command(spec, study, label)), "->", log.relative_to(ROOT), flush=True)
+    with log.open("w", encoding="utf-8") as f:
+        run([sys.executable, "-m", *continue_command(spec, study, label)], stdout=f, stderr=subprocess.STDOUT, cwd=ROOT, env=modal_env(spec), check=True)
+    if read_json(path)["calls"][label] == record["calls"][label]:
+        raise NoContinuation(f"modal_app.py::resume recorded no new call (see {log.relative_to(ROOT)})")
+
+
 # --- watch -----------------------------------------------------------------------------------------------------------
 
 NETWORK_MARKERS = ("nodename nor servname", "name or service not known", "temporary failure in name resolution", "unavailable", "connection reset",
@@ -944,18 +969,25 @@ def transient(error):
 
 
 class TrialFailed(Exception):
-    """A full-weight trial that failed with an error returns {"failed": ...} (modal_app.failed_trial) instead of raising,
-    so Modal does not retry it; poll_modal raises this for it, which watch_studies marks failed like any trial error."""
+    """A full-weight trial that failed with an error returns {"failed": ...} (modal_app.failed_trial) instead of raising;
+    poll_modal raises this for it, which watch_studies marks failed like any trial error (never continued)."""
+
+
+class NoContinuation(Exception):
+    """A timed-out trial that is not continued (no attempt left under its study's admission bound, no attempt ledger, or
+    the continuation spawned no call): watch_studies marks it failed."""
 
 
 def poll_modal(call_id):
-    """'running' | 'done' for a spawned trial; the trial's exception (or a network error) propagates, and a returned
-    failure is raised as TrialFailed."""
+    """'running' | 'done' | 'timeout' (the call ran out of time: its container was cancelled at the timeout) for a spawned
+    trial; the trial's exception (or a network error) propagates, and a returned failure is raised as TrialFailed."""
     import modal
     try:
         result = modal.FunctionCall.from_id(call_id).get(timeout=0.5)
     except TimeoutError:            # builtin: no output yet (modal.exception.FunctionTimeoutError is not a builtin TimeoutError)
         return "running"
+    except modal.exception.FunctionTimeoutError:
+        return "timeout"
     except modal.exception.OutputExpiredError:   # finished long ago; the result is on the volume
         return "done"
     if isinstance(result, dict) and "failed" in result: raise TrialFailed(result["failed"])
@@ -966,7 +998,7 @@ class Unmapped(Exception):
     """A finished call trained no arm of the spec: its reads cannot be launched."""
 
 
-def watch_studies(studies, on_done, poll=poll_modal, interval=120, max_transient=60, sleep=time.sleep, log=print, root=ROOT, now=time.time):
+def watch_studies(studies, on_done, poll=poll_modal, interval=120, max_transient=60, sleep=time.sleep, log=print, root=ROOT, now=time.time, on_timeout=None):
     """Poll every spawned trial of the studies until each is settled, calling on_done(study, label) for a finished trial
     until it succeeds; returns the finished calls that map to no arm. State lives in runs/<study>.watch.json, replaced
     atomically after every change, so a restarted watcher resumes: finished trials are not polled again and launched reads
@@ -974,16 +1006,26 @@ def watch_studies(studies, on_done, poll=poll_modal, interval=120, max_transient
     launch and calls on_done again, which must check what already happened (kev.rounds.launch_arm_reads does). Network
     errors while polling are retried (max_transient in a row marks the call failed); an on_done that raises (a pull that
     lost the network, reads still in flight) is retried on the next pass; one that raises Unmapped leaves the call
-    unlaunched, logged, and settled so the watch can end."""
+    unlaunched, logged, and settled so the watch can end.
+    A call that ends by a timeout goes to on_timeout(study, label) (watch's: the trial's next attempt, which records its call
+    as the label's current call in runs/<study>.spawn.json); the spawn record is read on every pass, and a label whose
+    call changed (a continuation, from here or by hand) is polled again from its new call. Without on_timeout, or when it
+    raises NoContinuation, the timeout is the trial's failure; any other error from it is retried on the next pass
+    (max_transient in a row marks the trial failed). `continuing_at` is written before on_timeout runs; a restart that
+    finds it and a changed call adopts the call, one that finds the call unchanged asks again (modal_app.continue_full_trial
+    refuses a second attempt while one runs and counts every attempt in the ledger)."""
     runs = Path(root) / "runs"
-    calls = {study: read_json(runs / f"{study}.spawn.json")["calls"] for study in studies}
     while True:
         settled = True
+        calls = {study: read_json(runs / f"{study}.spawn.json")["calls"] for study in studies}   # a continuation replaces a label's call
         for study, study_calls in calls.items():
             path = runs / f"{study}.watch.json"
             state = read_json(path) if path.exists() else {"calls": {}}
             for label, call_id in study_calls.items():
                 s = state["calls"].setdefault(label, {"status": "running", "launched": False, "transient": 0})
+                if s.setdefault("call", call_id) != call_id and s["status"] != "done":   # the trial's next attempt
+                    log(f"{study}/{label}: polling its continuation {call_id} (was {s['call']})")
+                    s.update(call=call_id, status="running", transient=0); s.pop("error", None); s.pop("continuing_at", None)
                 if s["status"] == "running":
                     try:
                         s["status"], s["transient"] = poll(call_id), 0
@@ -992,6 +1034,22 @@ def watch_studies(studies, on_done, poll=poll_modal, interval=120, max_transient
                             s["transient"] += 1; log(f"{study}/{label}: network error, retrying ({type(error).__name__}: {str(error)[:120]})")
                         else:
                             s["status"], s["error"] = "failed", f"{type(error).__name__}: {str(error)[:300]}"; log(f"{study}/{label}: FAILED {s['error']}")
+                if s["status"] == "timeout":
+                    if on_timeout is None:
+                        s["status"], s["error"] = "failed", "FunctionTimeoutError (not continued: no on_timeout)"; log(f"{study}/{label}: FAILED {s['error']}")
+                    else:
+                        if "continuing_at" in s: log(f"{study}/{label}: a continuation asked for at {s['continuing_at']:.0f} spawned no call it recorded; asking again")
+                        s["continuing_at"] = now(); write_json(path, state, atomic=True)
+                        try:
+                            on_timeout(study, label); log(f"{study}/{label}: timed out; its next attempt was spawned")
+                        except NoContinuation as error:
+                            s["status"], s["error"] = "failed", f"FunctionTimeoutError, not continued: {error}"; s.pop("continuing_at"); log(f"!!! {study}/{label}: FAILED {s['error']}")
+                        except Exception as error:   # noqa: BLE001 - the network, or a refusal that may clear; retried on the next pass
+                            s["transient"] += 1; s.pop("continuing_at")
+                            if s["transient"] >= max_transient:
+                                s["status"], s["error"] = "failed", f"FunctionTimeoutError, continuation failed {s['transient']} times: {type(error).__name__}: {str(error)[:300]}"; log(f"!!! {study}/{label}: FAILED {s['error']}")
+                            else:
+                                log(f"{study}/{label}: continuing failed, retrying next pass ({type(error).__name__}: {str(error)[:300]})")
                 if s["status"] == "done" and not s["launched"] and not s.get("unmapped"):
                     if "launching_at" in s: log(f"{study}/{label}: a launch started at {s['launching_at']:.0f} was interrupted; checking the arm's reads before any relaunch")
                     s["launching_at"] = now(); write_json(path, state, atomic=True)
@@ -1026,7 +1084,7 @@ def watch(spec, interval=120, stagger=STAGGER, reads_timeout=6 * 3600):
         time.sleep(max(0.0, last[0] + stagger - time.time()))
         procs.extend(launch_arm_reads(spec, arm, stagger=stagger))
         last[0] = time.time()
-    unmapped = watch_studies(list(spec.get("studies", {})), on_done, interval=interval)
+    unmapped = watch_studies(list(spec.get("studies", {})), on_done, interval=interval, on_timeout=lambda study, label: continue_trial(spec, study, label))
     deadline = time.time() + reads_timeout
     finished = [a for a, x in spec["arms"].items() if x.get("trial") and (ROOT / x["trial"] / "result.json").exists()]
     while (waiting := [a for a in finished if not all((ROOT / d / "rows.json").exists() for _, d in side_reads(spec, a, spec["rule"], "candidate", arm_side(spec, a)))]) and time.time() < deadline:

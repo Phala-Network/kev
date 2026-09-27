@@ -1114,7 +1114,7 @@ def test_full_ft_plumbing():
 
 
 def test_continue_trial_only_continues_the_same_full_weight_run(tmp_path, monkeypatch):
-    """kev.experiment.continue_trial (a Modal retry after a timeout, or modal_app.py::resume) retrains with the trial's own
+    """kev.experiment.continue_trial (the next attempt after a timeout, modal_app.continue_full_trial) retrains with the trial's own
     config, which kev.train continues from its resume point, and scores it; it refuses a LoRA trial, a finished one and
     one whose code changed."""
     import kev.experiment as E
@@ -1224,8 +1224,8 @@ def test_resume_writer_bounds_the_wait_for_peers(tmp_path, monkeypatch):
 
 
 def test_full_weight_trial_failures_are_returned_and_seen(tmp_path, monkeypatch):
-    """A full-weight trial that fails with an error returns {"failed": ...} (Modal retries only what raises, and its
-    retries are for timeouts); kev.rounds.poll_modal raises TrialFailed for it, so the watcher marks it failed."""
+    """A full-weight trial that fails with an error returns {"failed": ...} (only a timeout is continued); kev.rounds.poll_modal
+    raises TrialFailed for it, so the watcher marks it failed."""
     import types
     import modal
     import modal_app
@@ -1239,6 +1239,109 @@ def test_full_weight_trial_failures_are_returned_and_seen(tmp_path, monkeypatch)
         rounds.poll_modal("fc-x")
     monkeypatch.setattr(modal.FunctionCall, "from_id", lambda call_id: types.SimpleNamespace(get=lambda timeout: {"label": "trial-0", "objective": 1.0}))
     assert rounds.poll_modal("fc-x") == "done"
+
+
+class _FakeModalFunction:
+    """modal.Function stand-in for run_full_trial: records with_options and spawn, returns call ids fc-new-<n>."""
+    def __init__(self): self.options, self.spawned = [], []
+
+    def with_options(self, **options):
+        self.options.append(options); return self
+
+    def spawn(self, *args):
+        self.spawned.append(args); return SimpleNamespace(object_id=f"fc-new-{len(self.spawned)}")
+
+
+def _ledgered_study(tmp_path, monkeypatch, record, status):
+    import modal_app
+    from kev import rounds
+    from kev.suite import write_json
+    (tmp_path / "runs").mkdir(exist_ok=True)
+    write_json(tmp_path / "runs/s.spawn.json", record)
+    fn = _FakeModalFunction()
+    monkeypatch.setattr(modal_app, "ROOT", tmp_path)
+    monkeypatch.setattr(modal_app, "deployed_run_trial", lambda sources, function: fn if function == "run_full_trial" else pytest.fail(function))
+    monkeypatch.setattr(rounds, "poll_modal", lambda call_id: status[call_id])
+    return modal_app, fn
+
+
+def test_full_weight_studies_spawn_without_modal_retries(tmp_path, monkeypatch):
+    """Modal charged each killed timed-out attempt twice against Retries(2): round 22's trial got two attempts of three. A
+    study now spawns every trial with retries off and writes the attempt ledger its continuations are counted in."""
+    import modal_app
+    from kev.budget import compute_bound
+    from kev.suite import read_json
+    monkeypatch.setattr(modal_app, "ROOT", tmp_path)
+    jobs = [modal_app.Job("s", 0, "trial-0", {"full_ft": 1}, "evals/smoke-v1", {}, "0" * 40, None, None)]
+    monkeypatch.setattr(modal_app, "admit_study", lambda *a: (jobs, 987.99, {"gpu": "H200:8", "timeout": 28800, "retries": 0, "cpu": 16, "memory": (1, 2),
+                                                                              "function": "run_full_trial", "full_ft": True}))
+    fn = _FakeModalFunction()
+    monkeypatch.setattr(modal_app, "deployed_run_trial", lambda sources, function: fn)
+    monkeypatch.setattr(modal_app, "local_source_hashes", lambda: {})
+    modal_app.launch_detached("evals/smoke-v1", "plan.json", "s", "H200:8", timeout=28800)
+    assert fn.options == [{"gpu": "H200:8", "timeout": 28800, "retries": 0, "cpu": 16, "memory": (1, 2)}]
+    assert read_json(tmp_path / "runs/s.spawn.json") == {"name": "s", "calls": {"trial-0": "fc-new-1"}, "attempts": {"trial-0": ["fc-new-1"]}, "bound_usd": 987.99,
+                                                         "gpu": "H200:8", "timeout": 28800, "full_ft": True, "modal_retries": 0}
+    assert compute_bound("H200:8", 28800, 1, True) == pytest.approx(987.99, abs=0.01)   # the three attempts the ledger allows
+
+
+def test_admit_study_turns_modal_retries_off(tmp_path, monkeypatch):
+    import kev.experiment
+    import modal_app
+    monkeypatch.setattr(kev.experiment, "load_plan", lambda suite, path: [{"full_ft": 1, "weights_dtype": "bf16"}])
+    monkeypatch.setattr(modal_app, "ROOT", tmp_path)
+    monkeypatch.setattr(modal_app, "local_git_commit", lambda: "0" * 40)
+    monkeypatch.setattr(modal_app, "local_source_hashes", lambda: {})
+    _, bound, options = modal_app.admit_study("evals/smoke-v1", "plan.json", "s", "H200:8", [], None, 1000, 28800)
+    assert options["retries"] == 0 and options["full_ft"] and options["function"] == "run_full_trial" and bound == pytest.approx(987.99, abs=0.01)
+
+
+def test_continue_full_trial_spawns_counted_attempts_one_at_a_time(tmp_path, monkeypatch):
+    """modal_app.continue_full_trial (resume --trial, which kev.rounds watch runs after a timeout): only a call that ended by
+    a timeout gets a next attempt, with the ledger's GPU and timeout and retries off; the ledger records it; a running
+    call (a second attempt would train the same directory) and a spent budget are refused; a trial without a ledger needs
+    --beyond-bound and is not recorded."""
+    from kev.budget import FULL_FT_RETRIES
+    from kev.suite import read_json
+    record = {"name": "s", "calls": {"trial-0": "fc-0"}, "attempts": {"trial-0": ["fc-0"]}, "bound_usd": 987.99, "gpu": "H200:8", "timeout": 28800,
+              "full_ft": True, "modal_retries": 0}
+    status = {"fc-0": "running", "fc-new-1": "timeout", "fc-new-2": "timeout"}
+    modal_app, fn = _ledgered_study(tmp_path, monkeypatch, record, status)
+    args = ("s", "00-trial-0", {"full_ft": 1}, "evals/sft-v2-r22", "evals/v4/transfer-v4", {"kev/x.py": "h"}, "c" * 40)
+    with pytest.raises(SystemExit, match="is running"):
+        modal_app.continue_full_trial(*args)
+    assert fn.spawned == []
+    status["fc-0"] = "timeout"
+    assert modal_app.continue_full_trial(*args) == "fc-new-1"
+    assert fn.options[-1] == {"gpu": "H200:8", "cpu": 16, "memory": (409600, 471040), "timeout": 28800, "retries": 0}
+    assert fn.spawned[-1] == ("s", 0, "trial-0", {"full_ft": 1}, "evals/sft-v2-r22", {"kev/x.py": "h"}, "c" * 40, None, "evals/v4/transfer-v4")
+    assert modal_app.continue_full_trial(*args) == "fc-new-2"
+    ledger = read_json(tmp_path / "runs/s.spawn.json")
+    assert ledger["calls"]["trial-0"] == "fc-new-2" and ledger["attempts"]["trial-0"] == ["fc-0", "fc-new-1", "fc-new-2"] and len(ledger["attempts"]["trial-0"]) == 1 + FULL_FT_RETRIES
+    with pytest.raises(SystemExit, match="3 of 3 attempts used"):
+        modal_app.continue_full_trial(*args)
+    assert len(fn.spawned) == 2
+    legacy = {"name": "s", "calls": {"trial-0": "fc-0"}, "bound_usd": 987.99, "timeout": 28800}   # round 22's record: Modal retried its calls
+    modal_app, fn = _ledgered_study(tmp_path, monkeypatch, legacy, {"fc-0": "timeout"})
+    with pytest.raises(SystemExit, match="no attempt ledger"):
+        modal_app.continue_full_trial(*args)
+    assert modal_app.continue_full_trial(*args, beyond_bound=("H200:8", 28800)) == "fc-new-1"
+    assert read_json(tmp_path / "runs/s.spawn.json") == legacy   # outside the ledger: not recorded as if it were bounded
+
+
+def test_continue_full_trial_refuses_a_call_that_did_not_time_out(tmp_path, monkeypatch):
+    record = {"name": "s", "calls": {"trial-0": "fc-0"}, "attempts": {"trial-0": ["fc-0"]}, "bound_usd": 987.99, "gpu": "H200:8", "timeout": 28800,
+              "full_ft": True, "modal_retries": 0}
+    def failed(call_id): raise RuntimeError("CUDA out of memory")
+    modal_app, fn = _ledgered_study(tmp_path, monkeypatch, record, {})
+    from kev import rounds
+    monkeypatch.setattr(rounds, "poll_modal", failed)
+    with pytest.raises(SystemExit, match=r"is failed \(RuntimeError\)"):
+        modal_app.continue_full_trial("s", "00-trial-0", {"full_ft": 1}, "suite", None, {}, "c" * 40)
+    monkeypatch.setattr(rounds, "poll_modal", lambda call_id: "done")
+    with pytest.raises(SystemExit, match="is done"):
+        modal_app.continue_full_trial("s", "00-trial-0", {"full_ft": 1}, "suite", None, {}, "c" * 40)
+    assert fn.spawned == []
 
 
 class _ScriptedStop:

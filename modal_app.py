@@ -111,8 +111,9 @@ def run_full_trial(study, index, label, config, suite, expected_sources, git_com
 
 def trial(study, index, label, config, suite, expected_sources, git_commit, existing=None, transfer=None):
     """One trial in one container. `existing` is a checkpoint path on the runs volume or a Hub id (legacy scoring). A
-    full-weight trial whose directory exists already is the same call again (Modal retried it after a timeout, or `resume`
-    spawned it): it continues from its last resume point, unless an earlier attempt failed with an error (failed.json)."""
+    full-weight trial whose directory exists already is its next attempt (continue_full_trial spawned it after a timeout,
+    for `kev.rounds watch` or `resume`): it continues from its last resume point, unless an earlier attempt failed with an
+    error (failed.json)."""
     import torch
     from kev.experiment import continue_trial, execute_trial, source_hashes
     from kev.suite import write_json
@@ -139,7 +140,7 @@ def trial(study, index, label, config, suite, expected_sources, git_commit, exis
                      else execute_trial(config or {}, Path("/root") / suite, out, expected_sources, "cuda", existing, transfer))
     except Exception as error:   # a timeout kills the container before it gets here
         if out.exists(): write_json(out / "failed.json", {"error": f"{type(error).__name__}: {str(error)[:2000]}"})
-        if config.get("full_ft"): return failed_trial(label, out)   # returned, not raised: Modal retries only what raises
+        if config.get("full_ft"): return failed_trial(label, out)   # returned, not raised: an error is final, never continued
         raise
     finally:
         stop.set()
@@ -605,9 +606,9 @@ class Job(NamedTuple):
 
 
 def failed_trial(label, out):
-    """The result of a full-weight trial that failed with an error (failed.json). Returned rather than raised, because
-    Modal retries a raised call, and a full-weight trial's retries are for timeouts (they continue from a resume point);
-    kev.rounds.poll_modal and launch() read "failed" as the trial's failure."""
+    """The result of a full-weight trial that failed with an error (failed.json). Returned rather than raised, so that it
+    cannot pass for an interruption: only a timeout is continued (continue_full_trial, from a resume point), and a retried
+    call would find failed.json and report it again; kev.rounds.poll_modal and launch() read "failed" as the trial's failure."""
     return {"label": label, "failed": json.loads((out / "failed.json").read_text(encoding="utf-8"))["error"]}
 
 
@@ -616,7 +617,7 @@ RESUME_COMMIT_POLL = 15   # seconds between looks at a training trial's latest.j
 
 class VolumeWatcher:
     """What a full-weight trial has committed to the runs volume, and one look for more (poll). A timeout kills the
-    container without running trial()'s `finally`, and the retry can only continue from a committed point and keep
+    container without running trial()'s `finally`, and the next attempt can only continue from a committed point and keep
     committed snapshots, so the runs volume is committed each time the trainer completes a resume point (its latest.json
     changes), a snapshot (kev.full_ft.completed_snapshots under `snapshot_dir` gains a step) or the final checkpoint
     (`final_dir`/training_metrics.json, written last, appears). What is on disk when the watcher is built (what a new
@@ -705,14 +706,16 @@ def admit_study(suite, plan_path, name, gpu, existing, transfer, budget, timeout
     if upper > budget:
         raise ValueError(f"timeout-based compute bound ${upper:.2f} exceeds budget ${budget:.2f}")
     print(f"Compute admission bound ${upper:.2f}; excludes image build, startup, and storage; "
-          + (f"counts {FULL_FT_RETRIES} retries per trial (a timed-out full-weight trial continues from its resume point)." if full_ft else "no automatic retries."), flush=True)
+          + (f"counts {1 + FULL_FT_RETRIES} attempts per trial (a timed-out full-weight trial is continued from its resume point by "
+             "`kev.rounds watch` or `modal_app.py::resume --trial`, each continuation a new call)." if full_ft else "no automatic retries."), flush=True)
     commit, sources = local_git_commit(), local_source_hashes()
     if subprocess.run(["git", "status", "--porcelain", "kev", "evals"], cwd=ROOT, capture_output=True, text=True).stdout.strip():
         print("warning: kev/ or evals/ has uncommitted changes; provenance records the last commit, not the working tree", flush=True)
     entries = [(None, p) for p in existing] + [(t, None) for t in trials]
     cpu, memory = trial_resources(gpu, full_ft)
-    retries = modal.Retries(max_retries=FULL_FT_RETRIES, initial_delay=30.0, backoff_coefficient=1.0) if full_ft else 0   # a retry continues the trial
-    options = {"gpu": gpu, "timeout": timeout, "retries": retries, "cpu": cpu, "memory": memory, "function": "run_full_trial" if full_ft else "run_trial"}
+    # Modal's retries stay off even for a full-weight trial: one call is one attempt, and continuations are counted calls
+    # (kev.budget.FULL_FT_RETRIES says why Modal's retries gave round 22 two attempts instead of three)
+    options = {"gpu": gpu, "timeout": timeout, "retries": 0, "cpu": cpu, "memory": memory, "function": "run_full_trial" if full_ft else "run_trial", "full_ft": full_ft}
     return [Job(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex, transfer) for i, (cfg, ex) in enumerate(entries)], upper, options
 
 
@@ -735,16 +738,23 @@ def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, bud
     land on the volume; `pull --name` collects and ranks them."""
     from kev.suite import write_json
     jobs, upper, options = admit_study(suite, plan_path, name, gpu, existing, transfer, budget, timeout)
+    full_ft = options.pop("full_ft")
     fn = deployed_run_trial(local_source_hashes(), options.pop("function")).with_options(**options)
     calls = [fn.spawn(*job) for job in jobs]
     (ROOT / "runs").mkdir(exist_ok=True)
-    write_json(ROOT / "runs" / f"{name}.spawn.json", {"name": name, "calls": {j.label: c.object_id for j, c in zip(jobs, calls)}, "bound_usd": round(upper, 2), "timeout": timeout})
+    # the attempt ledger: `calls` is each trial's current call (the one kev.rounds watch polls), `attempts` every call it
+    # made, continuations included (kev.budget.trial_attempts counts them against the bound; gpu and timeout are what the
+    # bound was admitted for, so a continuation uses them)
+    ids = {j.label: c.object_id for j, c in zip(jobs, calls)}
+    write_json(ROOT / "runs" / f"{name}.spawn.json", {"name": name, "calls": ids, "attempts": {k: [v] for k, v in ids.items()}, "bound_usd": round(upper, 2),
+                                                     "gpu": gpu, "timeout": timeout, "full_ft": full_ft, "modal_retries": 0})
     print(f"spawned study {name}: {len(jobs)} independent trial(s) on {gpu}, bound ${upper:.2f}. Pull later: modal run modal_app.py::pull --name {name}", flush=True)
 
 
 def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0, timeout=1800):
     """Attached variant: run the trials on this app, wait, then pull and rank. Dies with the local client."""
     jobs, _, options = admit_study(suite, plan_path, name, gpu, existing, transfer, budget, timeout)
+    if options.pop("full_ft"): print("attached: a full-weight trial that times out is not continued (run detached, or `resume --trial ... --beyond-bound`)", flush=True)
     fn = {"run_trial": run_trial, "run_full_trial": run_full_trial}[options.pop("function")].with_options(**options, max_containers=24)
     print(f"launching {len(jobs)} trial(s) on {gpu} for study {name}", flush=True)
     results = list(fn.starmap(jobs, return_exceptions=True))
@@ -821,26 +831,88 @@ def run_resume(study, trial, suite, transfer, expected_sources, git_commit):
     return {"trial": trial, "objective": report["objective"], "transfer_acc": (report.get("transfer") or {}).get("clean", {}).get("acc")}
 
 
+def spawn_record(study):
+    return ROOT / "runs" / f"{study}.spawn.json"
+
+
+def continue_full_trial(study, trial, config, suite, transfer, sources, commit, beyond_bound=None):
+    """Spawn the next attempt of a full-weight trial (<NN>-<label> under /runs/<study>): run_full_trial again, which
+    continues from the trial's last resume point, or only scores it when its checkpoint is complete
+    (kev.experiment.continue_trial). Under a per-study lock, against the study's attempt ledger (runs/<study>.spawn.json):
+    refused while the trial's current call is running (two attempts would train one directory), unless that call ended
+    by a timeout, and once kev.budget.trial_attempts has no attempt left; the call gets the GPU and timeout the bound was
+    admitted for, Modal's retries off, and is recorded as the trial's current call. `beyond_bound` = (gpu, timeout) spawns
+    for a study without a ledger (an attached launch, or a record written before the ledger), outside any admission bound,
+    and says so. Returns the call id."""
+    from kev.budget import trial_attempts
+    from kev.rounds import poll_modal
+    from kev.suite import file_lock, read_json, write_json
+    index, label = trial.split("-", 1)
+    with file_lock(ROOT / "runs" / f".continue-{study}.lock"):
+        record = read_json(spawn_record(study)) if spawn_record(study).exists() else None
+        ledger = record is not None and record.get("modal_retries") == 0 and label in record["calls"]
+        if not ledger and not beyond_bound:
+            raise SystemExit(f"{study}/{trial}: no attempt ledger for this trial in {spawn_record(study).relative_to(ROOT)} (spawned before the ledger, attached, or "
+                             "from another checkout), so a continuation cannot be counted against the study's admission bound; pass --beyond-bound to spawn one anyway")
+        if ledger:
+            used, allowed = trial_attempts(record, label)
+            if used >= allowed:
+                raise SystemExit(f"{study}/{trial}: {used} of {allowed} attempts used; the admission bound (${record['bound_usd']}) counts no more")
+            status = poll_status(record["calls"][label], poll_modal)
+            if status != "timeout":
+                raise SystemExit(f"{study}/{trial}: its current call {record['calls'][label]} is {status}; only a call that ended by a timeout is continued")
+            gpu, timeout = record["gpu"], record["timeout"]
+        else:
+            gpu, timeout = beyond_bound
+            print(f"!!! {study}/{trial}: continuing outside the admission bound (no attempt ledger), {gpu} for up to {timeout} s", flush=True)
+        cpu, memory = trial_resources(gpu, True)
+        call = deployed_run_trial(sources, "run_full_trial").with_options(gpu=gpu, cpu=cpu, memory=memory, timeout=timeout, retries=0).spawn(
+            study, int(index), label, config, suite, sources, commit, None, transfer or None)
+        if ledger:
+            record["attempts"].setdefault(label, [record["calls"][label]]).append(call.object_id); record["calls"][label] = call.object_id
+            write_json(spawn_record(study), record, atomic=True)
+            print(f"continuing {study}/{trial} from its last resume point: call {call.object_id} (attempt {used + 1} of {allowed})", flush=True)
+        else:
+            print(f"continuing {study}/{trial} from its last resume point: call {call.object_id} (not in any ledger)", flush=True)
+        return call.object_id
+
+
+def poll_status(call_id, poll):
+    """kev.rounds.poll_modal's status of a call, with a failure (raised) reported as "failed"."""
+    try:
+        return poll(call_id)
+    except Exception as error:   # noqa: BLE001 - the trial's own error, or the network: either way not a timeout
+        return f"failed ({type(error).__name__})"
+
+
 @app.local_entrypoint()
-def resume(study: str, suite: str, transfer: str = "evals/v4/transfer-v4", gpu: str = GPU, timeout: int = 28800):
+def resume(study: str, suite: str, transfer: str = "evals/v4/transfer-v4", gpu: str = GPU, timeout: int = 28800, trial: str = "", beyond_bound: bool = False):
     """Spawn evaluation for every trial in a study that has checkpoint/head.pt but no result.json, and continue every
-    unfinished full-weight trial (no head.pt, no failed.json) from its last resume point on the deployed run_trial."""
+    unfinished full-weight trial (no result.json, no failed.json) with the next attempt (continue_full_trial: counted in
+    the study's attempt ledger, with the ledger's GPU and timeout). `trial` (<NN>-<label> or <label>) limits it to one
+    trial: `kev.rounds watch` continues a timed-out trial this way. --gpu/--timeout serve run_resume and, with
+    --beyond-bound, a continuation of a trial that has no ledger."""
     fn = modal.Function.from_name(APP_NAME, "run_resume").with_options(gpu=gpu)
     sources, commit = local_source_hashes(), local_git_commit()
-    for t in sorted(volume_names(f"/{study}")[0]):
+    trials = sorted(t for t in volume_names(f"/{study}")[0] if not trial or trial in (t, t.split("-", 1)[-1]))
+    if trial and not trials: raise SystemExit(f"no trial {trial!r} under /{study}")
+    for t in trials:
         dirs, files = volume_names(f"/{study}/{t}")
         finished = "checkpoint" in dirs and "head.pt" in volume_names(f"/{study}/{t}/checkpoint")[1]
-        if finished and "result.json" not in files:
+        if {"result.json", "failed.json"} & files or "provenance.json" not in files:
+            print(f"skip {study}/{t}: {'has result' if 'result.json' in files else 'failed' if 'failed.json' in files else 'no provenance.json'}"); continue
+        config = json.loads(b"".join(runs_volume.read_file(f"/{study}/{t}/provenance.json")))["config"]
+        record = json.loads(spawn_record(study).read_text(encoding="utf-8")) if spawn_record(study).exists() else {}
+        if config.get("full_ft") and (not finished or record.get("modal_retries") == 0):   # a ledgered trial is scored by its own next attempt
+            try:
+                continue_full_trial(study, t, config, suite, transfer, sources, commit, (gpu, timeout) if beyond_bound else None)
+            except SystemExit as refusal:
+                if trial: raise   # the one trial asked for (the watcher reads the exit status)
+                print(f"skip {refusal}")
+        elif finished:
             c = fn.spawn(study, t, suite, transfer, sources, commit); print(f"resuming {study}/{t}: call {c.object_id}")
-        elif not finished and not {"result.json", "failed.json"} & files and "provenance.json" in files:
-            config = json.loads(b"".join(runs_volume.read_file(f"/{study}/{t}/provenance.json")))["config"]
-            if not config.get("full_ft"): print(f"skip {study}/{t}: unfinished, not full-weight"); continue
-            index, label = t.split("-", 1)
-            cpu, memory = trial_resources(gpu, True)
-            c = deployed_run_trial(sources, "run_full_trial").with_options(gpu=gpu, cpu=cpu, memory=memory, timeout=timeout).spawn(study, int(index), label, config, suite, sources, commit, None, transfer or None)
-            print(f"continuing {study}/{t} from its last resume point: call {c.object_id}")
         else:
-            print(f"skip {study}/{t}: {'has result' if 'result.json' in files else 'failed' if 'failed.json' in files else 'no finished checkpoint'}")
+            print(f"skip {study}/{t}: unfinished, not full-weight")
 
 
 @app.local_entrypoint()
