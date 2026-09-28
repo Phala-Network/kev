@@ -1531,6 +1531,106 @@ What may be committed: as round 24. Public-suite rows and reports are committed.
 ood / agents-ood / guardrails-ood rows, and private test rows go to the private dataset with `scripts/private_rows.py`,
 never to git, and the family names are never written publicly.
 
+### Round 23 result
+
+**Candidate: `27b-k-w85`** (0.85 · round 22's final + 0.15 · Kev-27B merged in fp32, the SFT's pointer head;
+`/runs/r23-wise/27b-k-w85/checkpoint`). **5 of 6** candidates pass the registered rule; `27b-k-w50` fails breadth ECE
+(0.0195 against the bar 0.0176). The rank (breadth + tasksource-heldout + Kev-panel accuracy gain) orders the passing five
+`27b-k-w85` +13.8, `27b-kh-w85` +13.7, `27b-k-w70` +13.6, `27b-kh-w70` +13.5, `27b-kh-w50` +12.8. Read-out:
+`runs/r23-readout/round23.json` (`python -m kev.rounds readout experiments/rounds/r23.json`, run 2026-09-28T20:31Z after
+the last read landed), table `runs/r23-readout/readout.txt`, markdown `runs/r23-readout/tables.md`. Every candidate is served
+at its pooled T (648 questions, none excluded as a transfer-v4 duplicate) and Kev-27B at 1.382. Deltas are paired
+record-clustered bootstraps against Kev-27B (2,000 resamples, seed 0, micro): accuracy and confident errors in pp, Brier
+absolute, ECE as served against its bar. The exclusions removed the same questions as round 24: 600 breadth, 795
+tasksource-heldout, 380 Kev-panel and 220 short-state, on both sides.
+
+**Interpolations** (`modal_app.py::interpolate`, 8-CPU containers, 304-398 s per α; `runs/r23-wise/<arm>/interpolation.json`).
+SFT endpoint weights sha256 `3fa0182a…`, head `bfcf801e…` (T 1.0). Kev-27B endpoint: kind `lora`, merged in fp32 as base +
+peft `get_delta_weight` (496 adapted tensors of 850), weights `41bf5af0…`, head `1322189d…` (T 1.382). Blended backbones:
+α 0.85 `d27af6ab…`, α 0.70 `58332c7c…`, α 0.50 `7893a092…`; the `k` and `kh` arms of one α share the backbone
+bit for bit. Checked locally on the pulled `head.pt` files: every `k` head equals the SFT head exactly (max |Δ| 0), every `kh`
+head equals α · SFT + (1 − α) · Kev-27B in fp32 exactly, and `head.pt["interpolation"]` matches `interpolation.json` and both
+endpoint head hashes.
+
+| criterion | k-w85 | k-w70 | k-w50 | kh-w85 | kh-w70 | kh-w50 |
+|---|---|---|---|---|---|---|
+| T (pool, 648) [90 % CI] | 1.320 [1.203, 1.447] | 1.203 [1.097, 1.320] | 1.047 [0.955, 1.149] | 0.955 [0.871, 1.047] | 0.660 [0.602, 0.724] | 0.536 [0.489, 0.588] |
+| 1 breadth acc, lower > 0 (2475) | +1.5 [+0.6, +2.4] | +1.5 [+0.6, +2.2] | +1.3 [+0.5, +2.0] | +1.6 [+0.7, +2.5] | +1.3 [+0.4, +2.1] | +1.7 [+0.9, +2.4] |
+| 1 tasksource-heldout acc, lower > 0 (1993) | +4.2 [+2.5, +5.8] | +3.7 [+2.2, +5.3] | +3.3 [+1.9, +4.7] | +4.0 [+2.4, +5.6] | +3.8 [+2.3, +5.4] | +3.6 [+2.2, +4.9] |
+| 1 Kev panel acc, lower ≥ −1 (3351) | +8.1 [+7.0, +9.4] | +8.4 [+7.4, +9.6] | +7.5 [+6.5, +8.6] | +8.1 [+7.0, +9.4] | +8.4 [+7.3, +9.6] | +7.6 [+6.6, +8.7] |
+| 2 short acc, lower ≥ −2 (1586) | −0.9 [−1.95, +0.1] | −0.9 [−1.95, +0.0] | −0.8 [−1.7, +0.0] | −0.9 [−1.9, +0.1] | −0.8 [−1.8, +0.2] | −0.5 [−1.4, +0.4] |
+| 2 short Brier, upper ≤ +0.02 | −0.000 [−0.009, +0.009] | +0.000 [−0.008, +0.008] | +0.000 [−0.007, +0.009] | −0.001 [−0.009, +0.008] | −0.001 [−0.009, +0.008] | −0.001 [−0.008, +0.007] |
+| 2 short confident errors, upper ≤ +1 | −1.1 [−1.8, −0.4] | −0.5 [−1.1, +0.1] | −0.2 [−0.8, +0.3] | −0.9 [−1.7, −0.3] | −0.4 [−1.0, +0.2] | −0.1 [−0.7, +0.4] |
+| 2 CUAD acc, lower ≥ −2 (2254) | +0.8 [−0.2, +1.8] | +0.7 [−0.1, +1.6] | +0.6 [+0.0, +1.4] | +0.8 [−0.2, +1.8] | +0.7 [−0.1, +1.6] | +0.6 [−0.1, +1.4] |
+| 2 CUAD 16k+ acc, cand − parent ≥ −2 | 0.839 vs 0.837 | 0.840 vs 0.837 | 0.840 vs 0.837 | 0.839 vs 0.837 | 0.840 vs 0.837 | 0.841 vs 0.837 |
+| 2 unknowable share ≤ 0.05 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| 3 breadth ECE ≤ 0.0176 (Kev-27B 0.0076) | 0.0103 | 0.0156 | 0.0195 **fail** | 0.0117 | 0.0159 | 0.0136 |
+| 3 Kev-panel ECE ≤ 0.0327 (Kev-27B 0.0227) | 0.0146 | 0.0151 | 0.0189 | 0.0115 | 0.0150 | 0.0258 |
+| 3 tasksource-heldout ECE ≤ 0.0523 (Kev-27B 0.0423) | 0.0432 | 0.0315 | 0.0311 | 0.0401 | 0.0306 | 0.0358 |
+| rank score (Δ breadth + Δ tsheld + Δ Kev, pp) | +13.8 | +13.6 | +12.1 | +13.7 | +13.5 | +12.8 |
+| verdict | **PASS** | **PASS** | fail | **PASS** | **PASS** | **PASS** |
+
+The closest calls: short-state accuracy lower bounds of −1.95 pp for `27b-k-w85` and `27b-k-w70` against −2 (the same
+−1.95 as round 22's final in round 24), and `27b-k-w70`'s breadth ECE 0.0156.
+
+**Report-only panels** (paired deltas against Kev-27B; ECE absolute where marked):
+
+| panel | k-w85 | k-w70 | k-w50 | kh-w85 | kh-w70 | kh-w50 |
+|---|---|---|---|---|---|---|
+| breadth, all 14 sources, acc (3075) | +1.2 [+0.3, +2.2] | +1.1 [+0.3, +2.1] | +1.1 [+0.3, +1.8] | +1.2 [+0.3, +2.2] | +1.1 [+0.2, +2.0] | +1.5 [+0.7, +2.2] |
+| breadth cfcolor+humicroedit+chessbench, acc (450) | −1.1 [−5.1, +2.9] | −0.7 [−4.2, +2.9] | +0.2 [−2.7, +3.1] | −1.1 [−5.1, +2.7] | −0.4 [−4.0, +2.9] | +0.2 [−2.4, +2.9] |
+| tasksource-heldout all 24 families, acc (2788) | +3.9 [+2.6, +5.3] | +3.7 [+2.5, +5.0] | +3.4 [+2.2, +4.5] | +3.8 [+2.4, +5.1] | +3.7 [+2.5, +5.0] | +3.3 [+2.2, +4.4] |
+| hard-v1 acc (1083) | +17.9 [+15.3, +20.8] | +18.1 [+15.5, +20.8] | +16.1 [+13.5, +18.9] | +17.8 [+15.2, +20.7] | +18.1 [+15.5, +20.9] | +16.0 [+13.4, +18.8] |
+| Kev panel without hard-v1, acc (2268) | +3.5 [+2.3, +4.7] | +3.8 [+2.7, +4.9] | +3.5 [+2.5, +4.5] | +3.5 [+2.4, +4.7] | +3.7 [+2.7, +4.8] | +3.6 [+2.6, +4.6] |
+| SemIf acc (144) | −0.7 [−3.5, +2.1] | −1.4 [−4.2, +1.4] | +0.0 [−2.8, +2.8] | −0.7 [−3.5, +2.1] | −1.4 [−4.2, +1.4] | +0.0 [−2.8, +2.8] |
+| WANLI-v2 acc (1002) | +1.2 [−0.7, +3.0] | +1.7 [+0.0, +3.4] | +2.3 [+0.9, +3.7] | +1.2 [−0.7, +3.0] | +1.8 [+0.1, +3.5] | +2.3 [+0.9, +3.7] |
+| TypeSafe acc (89) | −1.1 [−5.1, +2.5] | −1.1 [−5.1, +2.5] | +0.0 [−3.4, +3.2] | −1.1 [−5.1, +2.5] | −1.1 [−5.1, +2.5] | +0.0 [−3.4, +3.2] |
+| ood-v2 acc (4988) | +1.2 [+0.7, +1.8] | +1.3 [+0.8, +1.8] | +1.1 [+0.6, +1.5] | +1.2 [+0.7, +1.7] | +1.3 [+0.8, +1.8] | +1.1 [+0.7, +1.5] |
+| agents-ood-v1 acc (2084) | +2.1 [+1.4, +2.8] | +2.1 [+1.4, +2.8] | +1.6 [+1.0, +2.3] | +2.1 [+1.4, +2.8] | +2.1 [+1.4, +2.8] | +1.6 [+1.0, +2.2] |
+| guardrails-ood-v1 acc (4949) | +4.0 [+3.4, +4.6] | +3.8 [+3.2, +4.5] | +3.7 [+3.1, +4.3] | +4.0 [+3.4, +4.7] | +3.9 [+3.3, +4.6] | +3.7 [+3.1, +4.3] |
+| ood-v2 ECE Δ | −0.024 [−0.029, −0.018] | −0.023 [−0.028, −0.018] | −0.022 [−0.027, −0.017] | −0.025 [−0.030, −0.019] | −0.022 [−0.027, −0.017] | −0.016 [−0.020, −0.011] |
+| agents-ood-v1 ECE Δ | −0.105 [−0.113, −0.097] | −0.101 [−0.109, −0.093] | −0.092 [−0.098, −0.084] | −0.105 [−0.113, −0.097] | −0.099 [−0.107, −0.091] | −0.080 [−0.087, −0.072] |
+| guardrails-ood-v1 ECE Δ | −0.069 [−0.074, −0.061] | −0.070 [−0.075, −0.063] | −0.066 [−0.071, −0.058] | −0.069 [−0.074, −0.062] | −0.069 [−0.074, −0.061] | −0.060 [−0.065, −0.052] |
+| breadth ECE Δ (gated panel) | +0.003 [−0.008, +0.013] | +0.008 [−0.007, +0.015] | +0.012 [−0.005, +0.017] | +0.004 [−0.008, +0.014] | +0.008 [−0.006, +0.017] | +0.006 [−0.008, +0.013] |
+| Kev ECE Δ | −0.008 [−0.021, +0.004] | −0.008 [−0.019, +0.003] | −0.004 [−0.017, +0.007] | −0.011 [−0.022, +0.002] | −0.008 [−0.019, +0.003] | +0.003 [−0.009, +0.013] |
+| tsheld ECE Δ | +0.001 [−0.019, +0.020] | −0.011 [−0.029, +0.007] | −0.011 [−0.026, +0.006] | −0.002 [−0.022, +0.016] | −0.012 [−0.029, +0.006] | −0.006 [−0.021, +0.012] |
+| CUAD ECE (Kev-27B 0.063) | 0.097 | 0.095 | 0.096 | 0.097 | 0.097 | 0.089 |
+| CUAD ECE 16k+ (Kev-27B 0.071) | 0.102 | 0.100 | 0.100 | 0.102 | 0.101 | 0.099 |
+| longdoc generated acc / ECE | 1.000 / 0.001 | 1.000 / 0.001 | 1.000 / 0.002 | 1.000 / 0.001 | 1.000 / 0.002 | 1.000 / 0.004 |
+| short-state acc, candidate / Kev-27B | 0.8947 / 0.9042 | 0.8947 / 0.9042 | 0.8960 / 0.9042 | 0.8953 / 0.9042 | 0.8966 / 0.9042 | 0.8991 / 0.9042 |
+
+**What the blends did.** Very little, even at α 0.50. Every candidate reads almost like round 22's final (round 24: breadth
++1.5, tasksource-heldout +4.1, Kev +7.9, short −0.9 [−2.0, +0.2], CUAD ECE 16k+ 0.102). The two things the blend was meant to
+recover barely move. Short-state accuracy goes from −0.9 to −0.5 pp at α 0.50 with the blended head. CUAD ECE goes from 0.097 (α 0.85)
+to 0.089 (α 0.50, blended head), against Kev-27B's 0.063; at 16k+ it stays at 0.099-0.102 against 0.071. Half of Kev-27B's weights brings back almost
+none of its short-state or contract-document behaviour. The accuracy gains mostly survive the blend (hard-v1 +16 to +18 pp,
+agents-ood and guardrails-ood unchanged). The blended heads need much lower temperatures (0.955 → 0.536 as α falls, against
+1.320 → 1.047 with the SFT head): averaging two heads trained on different backbones shrinks the pointer logits. Pooled T
+recalibrates that, and the `kh` and `k` arms of one α score within 0.4 pp of each other on every gated accuracy panel.
+
+**Deviations.** (i) App name: the spec's `"app": "kev-sft"` was not used. The interpolations ran with `KEV_APP_NAME=kev-r23`.
+The reads ran through a wrapper that calls `kev.rounds.launch_arm_reads` on an in-memory copy of the spec with
+`app = kev-r23`: the same `read_commands`, the same launch records `runs/r23-reads-<arm>.json` and the same per-arm lock.
+The spec file is unchanged. (ii) The registration says one candidate at a time. From 12:40Z, on Jared's instruction to go
+faster, two candidates' reads were in flight at once: `27b-kh-w85` was launched while `27b-k-w85`'s reads were still running,
+and after that each new batch started when one landed. Every launch still read the metered cost first and was below the gate
+(metered + $80 < $4,099.04). Launch times and readings are in the launch records and below. (iii) The tool counted 16 reads
+per candidate, as the spec lists (the run request said 17).
+
+**Spend.** Metered (Modal, workspace-wide): $3,787.06 before the interpolations, then $3,782.91 at the first read launch
+(revised down). Later readings before each launch: $3,806.93, $3,842.55, $3,871.84, $3,887.04 and $3,922.27. $3,961.81
+after the last read landed (2026-09-28T20:30Z). The rule stage cost about $175 metered so far, before metering lag.
+
+**Evidence** (committed): the read-out, its tables and the launch records; each candidate's `interpolation.json`; the
+public-suite reads `runs/r23-27b-<arm>-<tag>` (report + rows; OOD reads: reports only). Private (`jaredpalmer/kev-private-train`
+under `runs/r23/`, `runs/r23-readout/private-rows.json` @ `4e8c117e`, `scripts/private_rows.py restore`): the six
+tasksource-heldout-v1 reads (rows and reports) and the ood / agents-ood / guardrails-ood rows (30 files).
+
+**Next.** The registered confirmation of `27b-k-w85`, each read once. Tests stage: candidate test reads to
+`runs/r23c-27b-cand-<tag>`, with Kev-27B's side reused from round 24. Then the locked stage (`kev-27b-r23-ungated`), the bf16
+serving check and the release temperature. The same caveat applies as for round 24: the candidate's short-state development
+read is round 22's final's, which missed the locked bar by 2 questions.
+
 ## Next
 
 Goals and open questions, not registered rounds; each becomes a spec and a PLAN section before it runs.

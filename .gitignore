@@ -344,3 +344,31 @@ runs/r22-27b-lr2e6/00-trial-0/transfer/*
 runs/r22-27b-lr2e6/00-trial-0/calibration/*
 !runs/r22-27b-lr2e6/00-trial-0/calibration/temperature.json
 !runs/r22-27b-lr2e6/00-trial-0/snapshots/
+# round 23 (experiments/rounds/r23.json): the read-out, its table and private-rows manifest; each candidate's
+# interpolation report (runs/r23-wise/<arm>/interpolation.json; the checkpoints stay on the kev-runs volume); the read
+# launch records; every public-suite read's report + rows; the ood-v2 / agents-ood-v1 / guardrails-ood-v1 reads' reports
+# (aggregates only). Private (jaredpalmer/kev-private-train runs/r23/, runs/r23-readout/private-rows.json,
+# scripts/private_rows.py restore): every tasksource-heldout-v1 read (its rows and report name the private families) and
+# the ood / agents-ood / guardrails-ood rows. Confirmation (runs/r23-verdict/, runs/r23c-*): as round 24's.
+!runs/r23-readout/
+runs/r23-readout/*
+!runs/r23-readout/round23.json
+!runs/r23-readout/readout.txt
+!runs/r23-readout/tables.md
+!runs/r23-readout/private-rows.json
+!runs/r23-wise/
+!runs/r23-wise/*/
+runs/r23-wise/*/*
+!runs/r23-wise/*/interpolation.json
+!runs/r23-reads-*.json
+!runs/r23-27b-*/
+runs/r23-27b-*/*
+!runs/r23-27b-*/report.json
+!runs/r23-27b-*/rows.json
+runs/r23-27b-*-tsheld/
+runs/r23-27b-*-ood/rows.json
+runs/r23-27b-*-agentsood/rows.json
+runs/r23-27b-*-guardood/rows.json
+# tasksource-heldout-v1 test reads (rounds 23 and 24's confirmations): private, never in git
+runs/r24c-*-tshtest/
+runs/r23c-*-tshtest/
