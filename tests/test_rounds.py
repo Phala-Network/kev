@@ -559,6 +559,21 @@ def test_readout_reproduces_round_20():
     assert report["ranking"] == committed["ranking"] and report["candidates"] == committed["candidates"] == {"27b": None}
 
 
+def test_readout_reproduces_round_24():
+    """Round 24 (a retrospective selection over existing reads) reads a private exclusion list and private rows (every
+    tasksource-heldout-v1 read and the ood / agents-ood / guardrails-ood rows), restored from the private dataset their
+    manifests name; the test skips for an account without access. The CUAD by-length panel also needs longdoc-v1's private
+    development partition (kev.suite fetches it)."""
+    from scripts.private_rows import restore
+    try:
+        for manifest in ("runs/r24-readout/private-exclude.json", "runs/r24-readout/private-rows.json"): restore(manifest, ROOT)
+    except PermissionError as error:
+        pytest.skip(str(error))
+    report = rounds.readout(rounds.load(ROOT / "experiments/rounds/r24.json"), ROOT)
+    assert same(report, read_json(ROOT / "runs/r24-readout/round24.json"))
+    assert report["candidates"] == {"27b": "27b-r22-final"} and report["ranking"] == {"27b": ["27b-r22-final", "27b-r20a-w85"]}
+
+
 # --- temperature pools, transfer reads and checkpoints without a trial (round 20) -------------------------------------
 
 def _rows(root, d, ids, seed, scale=1.0, source="s"):
