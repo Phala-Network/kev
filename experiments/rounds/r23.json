@@ -1,6 +1,6 @@
 {
   "round": 23,
-  "registered": "PLAN.md > Round 23 - post-hoc blends of round 22's final SFT checkpoint toward Kev-27B's own weights (LoRA merged in fp32), alpha 0.85 / 0.70 / 0.50 x {SFT head, blended head}, no training; registered with this spec's commit, before any round-23 interpolation or read",
+  "registered": "PLAN.md > Round 23 - post-hoc blends of round 22's final SFT checkpoint toward Kev-27B's own weights (LoRA merged in fp32), alpha 0.85 / 0.70 / 0.50 x {SFT head, blended head}, no training, under round 24's audited rule and confirmation; re-registered with this spec's commit (2026-09-28), before any round-23 interpolation or read; supersedes the first registration (round 22's rule), never launched",
   "gpu": "H200",
   "app": "kev-sft",
   "reads": {
@@ -21,9 +21,6 @@
     },
     "semif": {
       "suite": "evals/external/semif-v1"
-    },
-    "scienthoon": {
-      "suite": "evals/external/scienthoon-v1"
     },
     "wanli2": {
       "suite": "evals/external/wanli-v2"
@@ -116,7 +113,12 @@
     },
     "exclude_reads": [
       "transfer"
-    ]
+    ],
+    "ci": {
+      "level": 0.9,
+      "samples": 2000,
+      "seed": 0
+    }
   },
   "drop_ids": [
     "codereviewer/cls-test/13657",
@@ -143,7 +145,6 @@
         "v9": "runs/r6-27bv2-s2-v9",
         "r3test": "runs/r19-P27-r3test",
         "semif": "runs/r6-27bv2-s2-semif",
-        "scienthoon": "runs/r6-27bv2-s2-scienthoon",
         "wanli2": "runs/r6-27bv2-s2-wanli2",
         "typesafe": "runs/r6-27bv2-s2-typesafe",
         "longdoc": "runs/longdoc-v1-kev-27b",
@@ -216,6 +217,12 @@
         "reads": [
           "breadth"
         ],
+        "exclude_sources": [
+          "routerbench",
+          "cfcolor",
+          "humicroedit",
+          "chessbench"
+        ],
         "metrics": [
           "acc",
           "ece"
@@ -225,6 +232,10 @@
         "reads": [
           "tsheld"
         ],
+        "exclude_file": {
+          "path": "runs/r24-private/tsheld-exclude.json",
+          "sha256": "a72030abc815261c3b675c3618af80dd410b2a46b295fd8dff20f2122d07e437"
+        },
         "metrics": [
           "acc",
           "ece"
@@ -237,6 +248,13 @@
           "devtools",
           "docs"
         ],
+        "exclude_sources": [
+          "emotion",
+          "flakeflagger"
+        ],
+        "exclude_tasks": [
+          "commitpackft_type"
+        ],
         "metrics": [
           "acc",
           "ece"
@@ -247,37 +265,13 @@
           "transfer",
           "r3test"
         ],
+        "exclude_sources": [
+          "emotion"
+        ],
         "metrics": [
           "acc",
           "brier",
           "confident_error_rate"
-        ]
-      },
-      "scienthoon": {
-        "reads": [
-          "scienthoon"
-        ],
-        "metrics": [
-          "acc"
-        ]
-      },
-      "wanli2": {
-        "reads": [
-          "wanli2"
-        ],
-        "metrics": [
-          "acc"
-        ]
-      },
-      "pooled_external": {
-        "reads": [
-          "semif",
-          "scienthoon",
-          "wanli2",
-          "typesafe"
-        ],
-        "metrics": [
-          "acc"
         ]
       },
       "long": {
@@ -296,6 +290,95 @@
           ]
         }
       },
+      "breadth_index": {
+        "reads": [
+          "breadth"
+        ],
+        "metrics": [
+          "acc",
+          "ece"
+        ],
+        "optional": true
+      },
+      "breadth_moved_to_report": {
+        "reads": [
+          "breadth"
+        ],
+        "source": [
+          "cfcolor",
+          "humicroedit",
+          "chessbench"
+        ],
+        "metrics": [
+          "acc"
+        ],
+        "optional": true
+      },
+      "tasksource_heldout_all_families": {
+        "reads": [
+          "tsheld"
+        ],
+        "metrics": [
+          "acc",
+          "ece"
+        ],
+        "optional": true
+      },
+      "hard": {
+        "reads": [
+          "hard"
+        ],
+        "metrics": [
+          "acc",
+          "ece"
+        ],
+        "optional": true
+      },
+      "kev_without_hard": {
+        "reads": [
+          "transfer",
+          "devtools",
+          "docs"
+        ],
+        "exclude_sources": [
+          "emotion",
+          "flakeflagger"
+        ],
+        "exclude_tasks": [
+          "commitpackft_type"
+        ],
+        "metrics": [
+          "acc"
+        ],
+        "optional": true
+      },
+      "semif": {
+        "reads": [
+          "semif"
+        ],
+        "metrics": [
+          "acc"
+        ],
+        "optional": true
+      },
+      "wanli2": {
+        "reads": [
+          "wanli2"
+        ],
+        "metrics": [
+          "acc"
+        ],
+        "optional": true
+      },
+      "typesafe": {
+        "reads": [
+          "typesafe"
+        ],
+        "metrics": [
+          "acc"
+        ],
+        "optional": true
+      },
       "long_generated": {
         "reads": [
           "longdoc"
@@ -305,39 +388,37 @@
           "acc",
           "ece"
         ],
-        "by_length": {
-          "tokenizer": [
-            "Qwen/Qwen3.8-27B",
-            "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0"
-          ]
-        }
+        "optional": true
       },
       "ood": {
         "reads": [
           "ood"
         ],
-        "report": [
+        "metrics": [
           "acc",
           "ece"
-        ]
+        ],
+        "optional": true
       },
       "agents_ood": {
         "reads": [
           "agentsood"
         ],
-        "report": [
+        "metrics": [
           "acc",
           "ece"
-        ]
+        ],
+        "optional": true
       },
       "guardrails_ood": {
         "reads": [
           "guardood"
         ],
-        "report": [
+        "metrics": [
           "acc",
           "ece"
-        ]
+        ],
+        "optional": true
       }
     },
     "unknowable": "v9",
@@ -362,30 +443,15 @@
         "op": ">=",
         "right": -0.02
       },
-      "2_short_brier_upper_at_most_0.01": {
+      "2_short_brier_upper_at_most_0.02": {
         "left": "short.brier.upper",
         "op": "<=",
-        "right": 0.01
+        "right": 0.02
       },
       "2_short_confident_errors_upper_at_most_1pp": {
         "left": "short.confident_error_rate.upper",
         "op": "<=",
         "right": 0.01
-      },
-      "2_wanli2_lower_at_least_minus_2pp": {
-        "left": "wanli2.acc.lower",
-        "op": ">=",
-        "right": -0.02
-      },
-      "2_scienthoon_lower_at_least_minus_4pp": {
-        "left": "scienthoon.acc.lower",
-        "op": ">=",
-        "right": -0.04
-      },
-      "2_pooled_lower_at_least_minus_2.5pp": {
-        "left": "pooled_external.acc.lower",
-        "op": ">=",
-        "right": -0.025
       },
       "2_long_cuad_lower_at_least_minus_2pp": {
         "left": "long.acc.lower",
@@ -422,12 +488,6 @@
         "op": "<=",
         "right": "tasksource_heldout.ece.parent",
         "plus": 0.01
-      },
-      "3_long_cuad_ece_16k_plus_at_most_parent_plus_0.01": {
-        "left": "long.ece_16k_plus.candidate",
-        "op": "<=",
-        "right": "long.ece_16k_plus.parent",
-        "plus": 0.01
       }
     },
     "rank": [
@@ -444,11 +504,17 @@
   "confirm": {
     "tests": {
       "candidate_reads": "runs/r23c-{size}-cand-{tag}",
-      "parent_reads": "runs/r23c-{size}-parent-{tag}",
+      "parent_reads": "runs/r24c-{size}-parent-{tag}",
       "panels": {
         "breadthtest": {
           "reads": [
             "breadthtest"
+          ],
+          "exclude_sources": [
+            "routerbench",
+            "cfcolor",
+            "humicroedit",
+            "chessbench"
           ],
           "metrics": [
             "acc"
@@ -461,6 +527,10 @@
           "reads": [
             "tshtest"
           ],
+          "exclude_file": {
+            "path": "runs/r24-private/tsheld-exclude.json",
+            "sha256": "a72030abc815261c3b675c3618af80dd410b2a46b295fd8dff20f2122d07e437"
+          },
           "metrics": [
             "acc"
           ],
@@ -474,9 +544,27 @@
             "devtest",
             "docs1test"
           ],
+          "exclude_sources": [
+            "flakeflagger"
+          ],
+          "exclude_tasks": [
+            "commitpackft_type"
+          ],
           "metrics": [
             "acc"
           ]
+        },
+        "breadthtest_index": {
+          "reads": [
+            "breadthtest"
+          ],
+          "metrics": [
+            "acc"
+          ],
+          "report": [
+            "ece"
+          ],
+          "optional": true
         },
         "hardtest": {
           "reads": [
@@ -484,15 +572,23 @@
           ],
           "metrics": [
             "acc"
-          ]
+          ],
+          "optional": true
         },
         "devtest": {
           "reads": [
             "devtest"
           ],
+          "exclude_sources": [
+            "flakeflagger"
+          ],
+          "exclude_tasks": [
+            "commitpackft_type"
+          ],
           "metrics": [
             "acc"
-          ]
+          ],
+          "optional": true
         },
         "docs1test": {
           "reads": [
@@ -500,7 +596,8 @@
           ],
           "metrics": [
             "acc"
-          ]
+          ],
+          "optional": true
         },
         "docs2": {
           "reads": [
@@ -508,7 +605,8 @@
           ],
           "metrics": [
             "acc"
-          ]
+          ],
+          "optional": true
         },
         "longtest": {
           "reads": [
@@ -526,7 +624,8 @@
               "Qwen/Qwen3.8-27B",
               "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0"
             ]
-          }
+          },
+          "optional": true
         },
         "longtest_generated": {
           "reads": [
@@ -536,7 +635,8 @@
           "report": [
             "acc",
             "ece"
-          ]
+          ],
+          "optional": true
         }
       },
       "criteria": {
