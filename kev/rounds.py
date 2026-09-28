@@ -49,8 +49,16 @@ Spec (paths are relative to the repo root; templates take {round}, {arm}, {size}
     drop_ids  record ids dropped on both sides of every comparison (devtools-v1's duplicated ids)
     rule      {panels, unknowable?, criteria, rank}
     confirm   {stage: {candidate_reads, parent_reads?, panels, criteria}}
-A panel is {reads: [tags], metrics: [bootstrapped], report: [value only], source?: filter, versus?: {name: dir}, by_length?};
-the tag "transfer" is the trial's own in-trial transfer read (or the arm's transfer_read). by_length (true, or {edges?:
+A panel is {reads: [tags], metrics: [bootstrapped], report: [value only], source?: filter, versus?: {name: dir}, by_length?,
+exclude_sources?, exclude_tasks?, exclude_file?, optional?}; the tag "transfer" is the trial's own in-trial transfer read (or
+the arm's transfer_read). source keeps one source (or a list of them); exclude_sources / exclude_tasks drop rows by source /
+task, and exclude_file ({path, sha256}: a JSON object of `ids` (question or record ids), `sources` and `tasks` lists, or a
+bare list of any of them) drops what it lists, checked against its registered hash, so a private list (round 24's
+tasksource-heldout families) enters a public spec only as a path and a sha256 (panel_filter; the same rows leave both
+sides and any `versus` reference; the panel records how many questions they removed as `excluded`). optional: true marks
+a report-only panel no criterion or rank may read; its absent reads leave the comparison complete (`missing_optional`).
+The `temperature` pool may carry ci: {level, samples, seed}, which adds each arm's bootstrap interval of its pooled
+temperature to the read-out (`temperature_ci`, report only). by_length (true, or {edges?:
 [tokens], tokenizer?: [name, revision]}) adds acc / ece / brier / confident_error_rate per state-token bucket
 (kev.metrics.calibration_by_length: "<metric>_<bucket>" entries, e.g. ece_16k_plus, value only) with state tokens counted
 from the reads' suite records. A criterion is {left, op, right, plus?} where left is a path
@@ -64,6 +72,11 @@ development rows, plus `shipped`, the head.pt temperature when it is here), and 
 are a training corpus's (in distribution: round 19's failure mode). From round 21 (POOL_REQUIRED_FROM) a rule or
 confirmation with a temperature-dependent criterion must register a `temperature` pool: validate and launch refuse it
 otherwise; earlier rounds get a warning, so their recorded specs keep validating.
+
+Removed suites (kev.suite.REMOVED_SUITES: evals/external/scienthoon-v1, removed 2026-09-27, last read by round 22). A round
+up to the suite's `last_round` that reads one validates with the read listed under `archived`; its read-out and
+confirmations are computed from the committed rows as before (they need rows, not the suite). A later round that names
+one is refused with the reason, and no read of one is launched again (read_commands skips it; kev.suite.load_split refuses it).
 """
 import argparse
 import functools
@@ -78,7 +91,7 @@ from typing import NamedTuple
 
 from kev.metrics import (LENGTH_EDGES, LENGTH_METRICS, calibration_by_length, length_buckets, metrics, paired_bootstrap, raw_row, recorded,
                          scored_rows, served, served_at, tempered_row, unknowable_report)
-from kev.suite import ADMISSION_TOKENIZER, digest, file_lock, load_split, read_json, read_manifest, write_json
+from kev.suite import ADMISSION_TOKENIZER, digest, file_lock, load_split, read_json, read_manifest, removed_suite, suite_key, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = 2000   # the registered resample count since round 5
@@ -114,6 +127,7 @@ class Pool(NamedTuple):
     reads: list     # directories whose rows are pooled
     sources: dict   # {directory: [source, ...]}: the only sources pooled from that read (absent = every source)
     exclude: list   # directories whose record ids are removed from the pool
+    ci: dict = None # {level, samples, seed}: also bootstrap the fitted temperature's interval (report only; round 24)
 
 
 def select_rows(reads, exclude=()):
@@ -131,6 +145,25 @@ def pooled_temperature(pool, root=ROOT):
     kept, rows = select_rows([(Path(root) / d / "rows.json", pool.sources.get(d)) for d in pool.reads], [Path(root) / d / "rows.json" for d in pool.exclude])
     return served(kept, [])[0], {"reads": pool.reads, **({"sources": pool.sources} if pool.sources else {}), "exclude_reads": pool.exclude,
                                  "questions": len(scored_rows(kept)), "excluded_questions": len(scored_rows(rows)) - len(scored_rows(kept))}
+
+
+def pooled_temperature_ci(pool, root=ROOT):
+    """The pooled temperature's bootstrap interval (report only; the audit of 2026-09-27: the served T of a 648-question pool
+    moves by ~±0.15, enough to move an ECE criterion by more than its margin): the same fit (TEMPERATURE_FIT's grid and
+    objective, knowable clean rows of select_rows) on `samples` resamples of the pool's (source, group) clusters within each
+    source (kev.metrics.cluster_resamples, seed), percentile interval at `level`. Each question's NLL on the grid is computed
+    once; a resample's fit is the grid point with the least mean NLL over its questions."""
+    import numpy as np
+    from kev.metrics import TEMPERATURE_FIT, cluster_resamples, nll_at_temperature
+    kept, _ = select_rows([(Path(root) / d / "rows.json", pool.sources.get(d)) for d in pool.reads], [Path(root) / d / "rows.json" for d in pool.exclude])
+    raw = served_at(kept, 1.0)
+    grid = np.exp(np.linspace(np.log(0.25), np.log(4), TEMPERATURE_FIT["points"]))
+    nll = np.asarray([[nll_at_temperature(r, float(t)) for t in grid] for r in raw])
+    level, samples, seed = pool.ci.get("level", 0.9), pool.ci.get("samples", SAMPLES), pool.ci.get("seed", 0)
+    fits = np.asarray([grid[int(np.argmin(nll[idx].mean(axis=0)))] for idx in cluster_resamples(raw, samples, seed)])
+    lower, upper = np.quantile(fits, [(1 - level) / 2, 1 - (1 - level) / 2])
+    return {"level": level, "samples": samples, "seed": seed, "lower": float(lower), "upper": float(upper), "questions": len(raw),
+            "resampled": "(source, group) clusters within each source (kev.metrics.cluster_resamples)"}
 
 
 class Side:
@@ -175,12 +208,90 @@ class Side:
         return self._served[tag]
 
     def panel(self, spec):
-        """A panel's served, knowable rows, reads concatenated in the order listed."""
-        rows = [r for tag in spec["reads"] for r in self.served(tag)]
-        return [r for r in rows if r["id"] not in self.drop and ("source" not in spec or r["source"] == spec["source"])]
+        """A panel's served, knowable rows, reads concatenated in the order listed, minus drop_ids and whatever the
+        panel's filters leave out (panel_filter: `source`, `exclude_sources`, `exclude_tasks`, `exclude_file`)."""
+        keep = panel_filter(spec, self.root)
+        return [r for tag in spec["reads"] for r in self.served(tag) if r["id"] not in self.drop and keep(r)]
 
     def unknowable_share(self, tag):
         return unknowable_report(served_clean(read_json(self.rows_path(tag)), self.t))["share_at_0_9"] if self.has(tag) else None
+
+
+# --- panel filters ---------------------------------------------------------------------------------------------------
+
+EXCLUDE_KEYS = ("exclude_sources", "exclude_tasks", "exclude_file")   # round 24: the audit's per-suite fixes, applied to both sides
+EXCLUDE_FILE_KEYS = ("ids", "sources", "tasks")                       # what an exclude file may list (other keys, e.g. a salt, are ignored)
+
+
+def exclude_file_path(entry, root=ROOT):
+    return Path(root) / entry["path"]
+
+
+@functools.cache
+def _exclusion(path, sha256):
+    if digest(path) != sha256:
+        raise ValueError(f"exclude_file {path} does not match the sha256 the spec registers ({sha256[:12]}...): a changed exclusion list is a new spec")
+    data = read_json(path)
+    if isinstance(data, list): return {k: frozenset(data) for k in EXCLUDE_FILE_KEYS}   # a bare list: ids, sources or tasks alike
+    return {k: frozenset(data.get(k, ())) for k in EXCLUDE_FILE_KEYS}
+
+
+def exclusion(entry, root=ROOT):
+    """{ids, sources, tasks} of a panel's exclude_file ({path, sha256}: a JSON object with any of those lists, or a bare list
+    matched against all three), checked against its registered sha256. The file may be private (never in git: e.g. round 24's
+    tasksource-heldout families, restored with scripts/private_rows.py); the spec carries only its path and hash."""
+    return _exclusion(exclude_file_path(entry, root), entry["sha256"])
+
+
+def panel_filter(panel, root=ROOT):
+    """row -> kept? for a panel: `source` (a name, or a list of names) keeps only those sources; `exclude_sources` and
+    `exclude_tasks` drop rows by source and task; `exclude_file` drops rows whose id, record (group), source or task it lists.
+    The same filter serves both sides of a comparison (and a `versus` reference), so paired deltas stay paired."""
+    source = panel.get("source")
+    only = None if source is None else {source} if isinstance(source, str) else set(source)
+    sources, tasks = set(panel.get("exclude_sources", ())), set(panel.get("exclude_tasks", ()))
+    listed = exclusion(panel["exclude_file"], root) if panel.get("exclude_file") else None
+    def keep(r):
+        if only is not None and r["source"] not in only: return False
+        if r["source"] in sources or r.get("task") in tasks: return False
+        return not (listed and (r["id"] in listed["ids"] or r.get("group") in listed["ids"] or r["source"] in listed["sources"] or r.get("task") in listed["tasks"]))
+    return keep
+
+
+def filter_problems(panel, spec, root=ROOT, rows=True):
+    """What is wrong with a panel's filters: malformed values, an exclude_file without {path, sha256}, and (rows: the local
+    data a read-out needs) an exclude_file here that does not match its hash. `exclude_sources` names are checked
+    against the manifests of the panel's reads (a typo would silently keep a source the rule means to drop)."""
+    problems, source = [], panel.get("source")   # an absent exclude_file is not a problem here: validate lists it with the absent rows
+    if source is not None and not (isinstance(source, str) or (isinstance(source, list) and source and all(isinstance(s, str) for s in source))):
+        problems.append("source is a source name or a non-empty list of names")
+    for key in ("exclude_sources", "exclude_tasks"):
+        if key in panel and not (isinstance(panel[key], list) and panel[key] and all(isinstance(s, str) for s in panel[key])):
+            problems.append(f"{key} is a non-empty list of names")
+    if "optional" in panel and not isinstance(panel["optional"], bool): problems.append("optional is true or false")
+    entry = panel.get("exclude_file")
+    if entry is not None:
+        if not (isinstance(entry, dict) and isinstance(entry.get("path"), str) and isinstance(entry.get("sha256"), str) and len(entry["sha256"]) == 64):
+            problems.append("exclude_file is {path, sha256}")
+        elif rows and exclude_file_path(entry, root).exists() and digest(exclude_file_path(entry, root)) != entry["sha256"]:
+            problems.append(f"exclude_file {entry['path']} does not match its registered sha256")
+    if isinstance(panel.get("exclude_sources"), list):
+        suites = [spec["reads"][t].get("suite") for t in panel["reads"] if t in spec["reads"]]
+        if TRANSFER in panel["reads"]:
+            tag = spec.get("transfer_read")
+            suites.append(spec["reads"].get(tag, {}).get("suite") if tag else None)
+        manifests = [suite_manifest(suite_dir(s)) if s and suite_dir(s) else None for s in suites]
+        if manifests and all(m is not None for m in manifests):
+            listed = set().union(*(listed_sources(m) for m in manifests))
+            if unknown := sorted(set(panel["exclude_sources"]) - listed): problems.append(f"exclude_sources name {unknown}, which no read of the panel lists")
+    return problems
+
+
+def gating_panels(rule):
+    """Panels a criterion or the rank reads: an `optional` panel (report only) must not be one of them."""
+    paths = [p for c in rule["criteria"].values() for p in _paths(c)]
+    paths += [p for key in rule.get("rank", []) for p in (key["by"] if isinstance(key["by"], list) else [key["by"]])]
+    return {p.split(".")[0] for p in paths}
 
 
 # --- spec ------------------------------------------------------------------------------------------------------------
@@ -221,7 +332,7 @@ def arm_side(spec, arm, root=ROOT, stage=None):
     pool, registered = None, spec.get("temperature")
     if registered:
         fit = {**development, **({TRANSFER: transfer} if transfer else {})}
-        pool = Pool([fit[r] for r in registered["reads"]], {fit[r]: s for r, s in registered.get("sources", {}).items()}, [fit[r] for r in registered.get("exclude_reads", [])])
+        pool = Pool([fit[r] for r in registered["reads"]], {fit[r]: s for r, s in registered.get("sources", {}).items()}, [fit[r] for r in registered.get("exclude_reads", [])], registered.get("ci"))
     suite = trial_suite(spec, a["trial"], root) if a.get("trial") and not pool else None
     return Side(a.get("trial"), dirs, root, spec.get("drop_ids", ()), pool, a.get("checkpoint"), suite)
 
@@ -252,7 +363,9 @@ def validate(spec, root=ROOT, rows=True, plans=True, partitions=False):
     under root (what a read-out, and so a launch, needs); plans: every read suite exists, every plan trial passes
     kev.experiment.validated_trial against its suite manifest and fits its budget; partitions: plans go through load_plan
     instead (verifies the partitions, may fetch them from the Hub). A recorded round (`archive`: the git tag holding its
-    evidence) lists absent files under `archived` instead of failing; a round without it must have them all."""
+    evidence) lists absent files under `archived` instead of failing; a round without it must have them all. A read of a
+    removed suite (kev.suite.REMOVED_SUITES) is archived (with plans) for a round up to the suite's last_round, whether or
+    not the round carries `archive`, and a problem for any later round."""
     problems, archived, root = [], [], Path(root)
     absent = (archived if spec.get("archive") else problems).append
     for key in ("round", "registered", "parents", "arms", "reads", "rule"):
@@ -263,6 +376,13 @@ def validate(spec, root=ROOT, rows=True, plans=True, partitions=False):
         if r.get("entrypoint", "benchmarks") not in ENTRYPOINTS: problems.append(f"read {name}: entrypoint {r['entrypoint']!r} is not one of {ENTRYPOINTS}"); continue
         if r.get("entrypoint", "benchmarks") == "benchmarks" and not r.get("suite"): problems.append(f"read {name}: no suite")
         if r.get("entrypoint") == "locked_test" and not r.get("decision"): problems.append(f"read {name}: locked_test needs a decision suite")
+        if r.get("suite") and (gone := removed_suite(r["suite"])):   # kev.suite.REMOVED_SUITES: archived up to its last round, refused after
+            if isinstance(spec["round"], int) and spec["round"] <= gone["last_round"]:
+                if plans: archived.append(f"read {name}: {r['suite']} not in this checkout: removed on {gone['removed']} (kev.suite.REMOVED_SUITES); "
+                                          f"round {spec['round']} read it before the removal, and the rows it made are the record")
+            else:
+                problems.append(f"read {name}: {r['suite']} was removed on {gone['removed']} and may not be read after round {gone['last_round']}: {gone['reason']}")
+            continue
         if plans and r.get("suite") and not (root / r["suite"]).exists(): absent(f"read {name}: {r['suite']} not in this checkout")
     stages = {None: spec["rule"], **spec.get("confirm", {})}
     reads_transfer = any(TRANSFER in panel["reads"] for rule in stages.values() for panel in rule["panels"].values())
@@ -288,6 +408,8 @@ def validate(spec, root=ROOT, rows=True, plans=True, partitions=False):
             if unknown: problems.append(f"{where} panel {pname}: unknown read tags {sorted(unknown)}")
             if not panel.get("metrics") and not panel.get("report"): problems.append(f"{where} panel {pname}: nothing to compute")
             problems += [f"{where} panel {pname}: {p}" for p in by_length_problems(panel, spec)]
+            problems += [f"{where} panel {pname}: {p}" for p in filter_problems(panel, spec, root, rows)]
+            if panel.get("optional") and pname in gating_panels(rule): problems.append(f"{where} panel {pname}: optional (report only), but a criterion or the rank reads it")
         for cname, c in rule["criteria"].items():
             if c.get("op") not in OPS: problems.append(f"{where} criterion {cname}: op {c.get('op')!r}")
             for path in _paths(c):
@@ -302,11 +424,15 @@ def validate(spec, root=ROOT, rows=True, plans=True, partitions=False):
         elif (root / s["suite"] / "manifest.json").exists(): problems += _validate_plan(study, s, root, partitions)
         else: absent(f"study {study}: suite {s['suite']} not in this checkout")
     if rows:
+        for where, pname, entry in [(s or "rule", n, p["exclude_file"]) for s, rule in stages.items() for n, p in rule["panels"].items() if isinstance(p.get("exclude_file"), dict)]:
+            if isinstance(entry.get("path"), str) and not exclude_file_path(entry, root).exists():
+                absent(f"{where} panel {pname}: exclude_file {entry['path']} not in this checkout (a private list: scripts/private_rows.py restore)")
         for pname, p in spec["parents"].items():
             if not (root / p["trial"] / "development/rows.json").exists(): absent(f"parent {pname}: {p['trial']}/development/rows.json not in this checkout")
         for arm in spec["arms"]:
             side = parent_side(spec, arm, root)
-            for tag in sorted(rule_tags(spec["rule"]) - {spec["rule"].get("unknowable")}):   # the parent's unknowable read is reported, not required
+            required = {t for panel in spec["rule"]["panels"].values() if not panel.get("optional") for t in panel["reads"]}   # an optional panel's reads may be absent
+            for tag in sorted(required - {spec["rule"].get("unknowable")}):   # the parent's unknowable read is reported, not required
                 if not side.has(tag): absent(f"arm {arm}: parent read {tag} not in this checkout ({side.dirs.get(tag, 'no location')})")
     return Validation(problems, archived)
 
@@ -397,8 +523,7 @@ def read_split(read):
 
 def suite_dir(path):
     """'evals/...' for a suite path given relative, absolute or as a container saw it (/root/kev/evals/sft-v1); None if none."""
-    parts = Path(str(path)).parts
-    return str(Path(*parts[parts.index("evals"):])) if "evals" in parts else None
+    return suite_key(path)
 
 
 @functools.cache
@@ -593,6 +718,21 @@ def shipped_temperature(entry, root=ROOT):
 SHIPPED_TOLERANCE = 0.05   # a parent served this far from its shipped temperature, fitted in distribution, is warned about
 
 
+def continuation_warnings(spec, root=ROOT):
+    """Report only: a full-weight study runs longer than one attempt only while something continues it. Its trials spawn
+    with Modal's retries off (kev.budget.FULL_FT_RETRIES says why), so a timed-out trial gets its next attempt from
+    `kev.rounds watch` (modal_app.continue_full_trial), or by hand with modal_app.py::resume --trial; an attached launch
+    keeps no attempt ledger and is never continued."""
+    out = []
+    for name, study in spec.get("studies", {}).items():
+        plan = Path(root) / study.get("plan", "")
+        trials = read_json(plan) if plan.is_file() else []
+        if any(isinstance(t, dict) and t.get("full_ft") for t in (trials if isinstance(trials, list) else [])):
+            out.append(f"study {name} is full-weight: a trial that times out is continued only while `kev.rounds watch` runs (or by hand: "
+                       f"modal_app.py::resume --study {name} --trial <label>); an attached launch (study --detached False) keeps no ledger and is never continued")
+    return out
+
+
 def calibration_warnings(spec, root=ROOT):
     """Report-only warnings that `validate` and `launch` print. (1) For a round before POOL_REQUIRED_FROM without a
     `temperature` pool whose criteria depend on the temperature (from then on it is a problem: pool_required_problems): each
@@ -645,6 +785,10 @@ def pool_problems(spec, stages):
     if not pool: return []
     reads, exclude = pool.get("reads") or [], pool.get("exclude_reads", [])
     problems = ["temperature: no reads to pool"] if not reads else []
+    ci = pool.get("ci")
+    if ci is not None and not (isinstance(ci, dict) and not set(ci) - {"level", "samples", "seed"} and 0 < ci.get("level", 0.9) < 1
+                               and isinstance(ci.get("samples", SAMPLES), int) and ci.get("samples", SAMPLES) > 0 and isinstance(ci.get("seed", 0), int)):
+        problems.append("temperature: ci is {level (0-1), samples (> 0), seed}")
     problems += [f"temperature: {tag!r} is not a read tag of this spec" for tag in reads if tag not in spec["reads"]]
     problems += [f"temperature: exclude_reads {tag!r} is not a read tag of this spec" for tag in exclude if tag not in spec["reads"] and tag != TRANSFER]
     for tag, sources in pool.get("sources", {}).items():
@@ -693,14 +837,22 @@ def compare(candidate, parent, rule, lengths=None):
         return {**out, "temperature": None, "missing": absent, "complete": False, "passed": None}
     out.update(temperature=candidate.t, parent_temperature=parent.t, panels={}, missing=[])
     if candidate.fit: out["temperature_fit"] = candidate.fit
+    if candidate.pool and candidate.pool.ci: out["temperature_ci"] = pooled_temperature_ci(candidate.pool, candidate.root)
     out["temperature_source"] = candidate.temperature_source()
     out["parent_temperature_source"] = parent.temperature_source()   # parents are served at their trial's development rows; `shipped` is head.pt's T
     for name, spec in rule["panels"].items():
         absent = [f"{who}:{side.dirs[t] if t in side.dirs else t}" for who, side in (("candidate", candidate), ("parent", parent)) for t in spec["reads"] if not side.has(t)]
-        if absent: out["missing"] += absent; continue
+        if isinstance(spec.get("exclude_file"), dict) and not exclude_file_path(spec["exclude_file"], candidate.root).exists():
+            absent.append(f"exclude_file:{spec['exclude_file']['path']}")
+        if absent:   # an optional (report-only) panel's absent reads leave the comparison complete
+            if spec.get("optional"): out.setdefault("missing_optional", []).extend(absent)
+            else: out["missing"] += absent
+            continue
         c, p = candidate.panel(spec), parent.panel(spec)
         mc, mp = metrics(c), metrics(p)
         panel = {"n": len(c)}
+        if any(k in spec for k in EXCLUDE_KEYS):   # questions the panel's exclusions removed (candidate side; the parent's are the same records)
+            panel["excluded"] = len(candidate.panel({k: v for k, v in spec.items() if k not in EXCLUDE_KEYS})) - len(c)
         for m in spec.get("metrics", ()):
             panel[m] = {"candidate": mc[m], "parent": mp[m], **paired(c, p, m)}
         for m in spec.get("report", ()):
@@ -708,7 +860,8 @@ def compare(candidate, parent, rule, lengths=None):
         if spec.get("by_length"):
             panel.update(_by_length(spec, c, p, lengths))
         for ref, d in spec.get("versus", {}).items():
-            rows = [r for r in read_json(candidate.root / d / "rows.json") if r["variant"] == "clean"]   # a reference as it served itself
+            keep = panel_filter(spec, candidate.root)
+            rows = [r for r in read_json(candidate.root / d / "rows.json") if r["variant"] == "clean" and keep(r)]   # a reference as it served itself
             panel.setdefault("versus", {})[ref] = {m: {"reference": metrics(rows)[m], **paired(c, rows, m)} for m in spec.get("metrics", ())}
         out["panels"][name] = panel
     if rule.get("unknowable"):
@@ -810,7 +963,11 @@ def table(report):
         if r.get("unknowable"): cells.append(f"unk {r['unknowable']['candidate']}")
         failed = [k for k, v in r.get("criteria", {}).items() if v is False]
         verdict = "incomplete" if not r.get("complete") else {True: "PASS", None: "reported", False: "fail: " + ", ".join(failed)}[r["passed"]]
-        lines.append(f"{arm:16} {' | '.join(cells)} -> {verdict}" + (f" (missing {len(r['missing'])})" if r.get("missing") else ""))
+        lines.append(f"{arm:16} {' | '.join(cells)} -> {verdict}" + (f" (missing {len(r['missing'])})" if r.get("missing") else "")
+                     + (f" (report-only reads missing {len(r['missing_optional'])})" if r.get("missing_optional") else ""))
+        if r.get("temperature_ci"):
+            ci = r["temperature_ci"]
+            lines.append(f"{'':16} T {r['temperature']:.3f}, {100 * ci['level']:.0f} % bootstrap interval [{ci['lower']:.3f}, {ci['upper']:.3f}] ({ci['questions']} pool questions)")
         for p, panel in r.get("panels", {}).items():
             if "by_length" not in panel: continue
             buckets = [name for name, _, _ in length_buckets(tuple(panel["by_length"]["edges"])) if panel[f"ece_{name}"]["n"]]
@@ -854,7 +1011,8 @@ def side_reads(spec, arm, rule, who, side, stage=None):
 
 def read_commands(spec, arm, stage=None, root=ROOT, sides=("candidate",)):
     """The `modal run` commands for the missing reads of one arm (and, with sides, its parent): one benchmarks call per side
-    with every suite batched, plus one locked_test call per locked read. Reads that exist locally are skipped."""
+    with every suite batched, plus one locked_test call per locked read. Reads that exist locally are skipped, and so are
+    reads of a removed suite (kev.suite.REMOVED_SUITES; the panels they feed stay missing)."""
     rule = spec["confirm"][stage] if stage else spec["rule"]
     size, commands = size_of(arm), []
     for who in sides:
@@ -871,6 +1029,9 @@ def read_commands(spec, arm, stage=None, root=ROOT, sides=("candidate",)):
                                  *spec.get("locked_args", {}).get(size, [])])
                 continue
             if not d.startswith("runs/") or "/" in d.removeprefix("runs/"): raise ValueError(f"{tag}: benchmarks writes runs/<name>, not {d}")
+            if gone := removed_suite(r["suite"]):   # never made again; skipped, not raised, so a watcher does not retry it forever
+                print(f"!!! {arm}: not launching read {tag} ({d}): {r['suite']} was removed on {gone['removed']} (kev.suite.REMOVED_SUITES)", flush=True)
+                continue
             jobs.append(bench_job(run, r["suite"], d.removeprefix("runs/"), r.get("flags", "")))
         if jobs:
             timeout = spec.get("read_timeout", {}).get(size)
@@ -924,6 +1085,37 @@ def pull(study, spec):
     subprocess.run([sys.executable, "-m", "modal", "run", "modal_app.py::pull", "--name", study], check=True, cwd=ROOT, env=modal_env(spec))
 
 
+def continue_command(spec, study, label):
+    s = spec["studies"][study]
+    return ["modal", "run", "modal_app.py::resume", "--study", study, "--suite", s["suite"], "--transfer", s["transfer"], "--trial", label]
+
+
+def continue_trial(spec, study, label, run=subprocess.run):
+    """The next attempt of a timed-out trial: modal_app.py::resume --trial (modal_app.continue_full_trial) spawns
+    run_full_trial again, which continues from the trial's last resume point, with the GPU and timeout the study was
+    admitted for, and records the call in runs/<study>.spawn.json; for a pending ledger entry it first adopts the call
+    from the trial's lease (or waits). Returns once the record names a new current call (spawned or adopted). Raises
+    NoContinuation when the study has no attempt ledger, when the ledger has no attempt left (kev.budget.trial_attempts,
+    the count compute_bound admitted; a pending last entry is resolved by the command first) or when the command
+    succeeded without recording a call, and RuntimeError when it refused (a live lease, a young pending entry, the
+    network: the watcher asks again on its next pass). Output in runs/<study>.continue-<label>-<attempt>.log."""
+    from kev.budget import trial_attempts
+    path = ROOT / "runs" / f"{study}.spawn.json"
+    record = read_json(path)
+    if record.get("modal_retries") != 0: raise NoContinuation(f"{path.name} has no attempt ledger (spawned with Modal's retries on, before the ledger)")
+    used, allowed = trial_attempts(record, label)
+    last = record["attempts"][label][-1]
+    if used >= allowed and (last["call"] is not None or last.get("abandoned")):
+        raise NoContinuation(f"{used} of {allowed} attempts used; the admission bound (${record.get('bound_usd')}) counts no more")
+    log = ROOT / "runs" / f"{study}.continue-{label}-{used + 1}.log"
+    print("continue:", " ".join(continue_command(spec, study, label)), "->", log.relative_to(ROOT), flush=True)
+    with log.open("a", encoding="utf-8") as f:
+        done = run([sys.executable, "-m", *continue_command(spec, study, label)], stdout=f, stderr=subprocess.STDOUT, cwd=ROOT, env=modal_env(spec))
+    if read_json(path)["calls"][label] != record["calls"][label]: return
+    if getattr(done, "returncode", 0): raise RuntimeError(f"modal_app.py::resume --trial exited {done.returncode} without a new call (see {log.relative_to(ROOT)})")
+    raise NoContinuation(f"modal_app.py::resume recorded no new call (see {log.relative_to(ROOT)})")
+
+
 # --- watch -----------------------------------------------------------------------------------------------------------
 
 NETWORK_MARKERS = ("nodename nor servname", "name or service not known", "temporary failure in name resolution", "unavailable", "connection reset",
@@ -944,21 +1136,30 @@ def transient(error):
 
 
 class TrialFailed(Exception):
-    """A full-weight trial that failed with an error returns {"failed": ...} (modal_app.failed_trial) instead of raising,
-    so Modal does not retry it; poll_modal raises this for it, which watch_studies marks failed like any trial error."""
+    """A full-weight trial that failed with an error returns {"failed": ...} (modal_app.failed_trial) instead of raising;
+    poll_modal raises this for it, which watch_studies marks failed like any trial error (never continued)."""
+
+
+class NoContinuation(Exception):
+    """A timed-out trial that is not continued (no attempt left under its study's admission bound, no attempt ledger, or
+    the continuation spawned no call): watch_studies marks it failed."""
 
 
 def poll_modal(call_id):
-    """'running' | 'done' for a spawned trial; the trial's exception (or a network error) propagates, and a returned
-    failure is raised as TrialFailed."""
+    """'running' | 'done' | 'timeout' (the call ran out of time: its container was cancelled at the timeout) | 'refused'
+    (a full-weight attempt that found another attempt's fresh lease and did not start: modal_app.TrialLease) for a spawned
+    trial; the trial's exception (or a network error) propagates, and a returned failure is raised as TrialFailed."""
     import modal
     try:
         result = modal.FunctionCall.from_id(call_id).get(timeout=0.5)
     except TimeoutError:            # builtin: no output yet (modal.exception.FunctionTimeoutError is not a builtin TimeoutError)
         return "running"
+    except modal.exception.FunctionTimeoutError:
+        return "timeout"
     except modal.exception.OutputExpiredError:   # finished long ago; the result is on the volume
         return "done"
     if isinstance(result, dict) and "failed" in result: raise TrialFailed(result["failed"])
+    if isinstance(result, dict) and "refused" in result: return "refused"
     return "done"
 
 
@@ -966,7 +1167,7 @@ class Unmapped(Exception):
     """A finished call trained no arm of the spec: its reads cannot be launched."""
 
 
-def watch_studies(studies, on_done, poll=poll_modal, interval=120, max_transient=60, sleep=time.sleep, log=print, root=ROOT, now=time.time):
+def watch_studies(studies, on_done, poll=poll_modal, interval=120, max_transient=60, sleep=time.sleep, log=print, root=ROOT, now=time.time, on_timeout=None):
     """Poll every spawned trial of the studies until each is settled, calling on_done(study, label) for a finished trial
     until it succeeds; returns the finished calls that map to no arm. State lives in runs/<study>.watch.json, replaced
     atomically after every change, so a restarted watcher resumes: finished trials are not polled again and launched reads
@@ -974,17 +1175,31 @@ def watch_studies(studies, on_done, poll=poll_modal, interval=120, max_transient
     launch and calls on_done again, which must check what already happened (kev.rounds.launch_arm_reads does). Network
     errors while polling are retried (max_transient in a row marks the call failed); an on_done that raises (a pull that
     lost the network, reads still in flight) is retried on the next pass; one that raises Unmapped leaves the call
-    unlaunched, logged, and settled so the watch can end."""
+    unlaunched, logged, and settled so the watch can end.
+    A call that ends by a timeout goes to on_timeout(study, label) (watch's: the trial's next attempt, which records its call
+    as the label's current call in runs/<study>.spawn.json); the spawn record is read on every pass, and a label whose
+    call changed (a continuation, from here or by hand) is polled again from its new call. Without on_timeout, or when it
+    raises NoContinuation, the timeout is the trial's failure; any other error from it is retried on the next pass
+    (max_transient in a row marks the trial failed). `continuing_at` is written before on_timeout runs; a restart that
+    finds it and a changed call adopts the call, one that finds the call unchanged asks again (modal_app.continue_full_trial
+    refuses a second attempt while one runs, waits for the old container's lease and counts every attempt in the ledger).
+    A call refused by the trial's lease, and a current attempt with no call recorded (a pending ledger entry), go to
+    on_timeout the same way."""
     runs = Path(root) / "runs"
-    calls = {study: read_json(runs / f"{study}.spawn.json")["calls"] for study in studies}
     while True:
         settled = True
+        calls = {study: read_json(runs / f"{study}.spawn.json")["calls"] for study in studies}   # a continuation replaces a label's call
         for study, study_calls in calls.items():
             path = runs / f"{study}.watch.json"
             state = read_json(path) if path.exists() else {"calls": {}}
             for label, call_id in study_calls.items():
                 s = state["calls"].setdefault(label, {"status": "running", "launched": False, "transient": 0})
-                if s["status"] == "running":
+                if s.setdefault("call", call_id) != call_id and s["status"] != "done":   # the trial's next attempt
+                    log(f"{study}/{label}: polling its continuation {call_id} (was {s['call']})")
+                    s.update(call=call_id, status="running", transient=0); s.pop("error", None); s.pop("continuing_at", None)
+                if s["status"] == "running" and call_id is None:   # a pending ledger entry: spawned, or about to be, with no call recorded
+                    s["status"] = "timeout"; log(f"{study}/{label}: no call recorded for its current attempt (pending); a continuation adopts it from its lease or waits")
+                elif s["status"] == "running":
                     try:
                         s["status"], s["transient"] = poll(call_id), 0
                     except Exception as error:   # noqa: BLE001 - a trial's own failure or this machine's network, told apart here
@@ -992,6 +1207,24 @@ def watch_studies(studies, on_done, poll=poll_modal, interval=120, max_transient
                             s["transient"] += 1; log(f"{study}/{label}: network error, retrying ({type(error).__name__}: {str(error)[:120]})")
                         else:
                             s["status"], s["error"] = "failed", f"{type(error).__name__}: {str(error)[:300]}"; log(f"{study}/{label}: FAILED {s['error']}")
+                if s["status"] == "refused":   # the attempt found another attempt's fresh lease and never started: it needs a next attempt too
+                    s["status"] = "timeout"; log(f"{study}/{label}: its call {call_id} was refused by the trial's lease (another attempt's container was alive)")
+                if s["status"] == "timeout":
+                    if on_timeout is None:
+                        s["status"], s["error"] = "failed", "FunctionTimeoutError (not continued: no on_timeout)"; log(f"{study}/{label}: FAILED {s['error']}")
+                    else:
+                        if "continuing_at" in s: log(f"{study}/{label}: a continuation asked for at {s['continuing_at']:.0f} spawned no call it recorded; asking again")
+                        s["continuing_at"] = now(); write_json(path, state, atomic=True)
+                        try:
+                            on_timeout(study, label); log(f"{study}/{label}: timed out; its next attempt was spawned")
+                        except NoContinuation as error:
+                            s["status"], s["error"] = "failed", f"FunctionTimeoutError, not continued: {error}"; s.pop("continuing_at"); log(f"!!! {study}/{label}: FAILED {s['error']}")
+                        except Exception as error:   # noqa: BLE001 - the network, or a refusal that may clear; retried on the next pass
+                            s["transient"] += 1; s.pop("continuing_at")
+                            if s["transient"] >= max_transient:
+                                s["status"], s["error"] = "failed", f"FunctionTimeoutError, continuation failed {s['transient']} times: {type(error).__name__}: {str(error)[:300]}"; log(f"!!! {study}/{label}: FAILED {s['error']}")
+                            else:
+                                log(f"{study}/{label}: continuing failed, retrying next pass ({type(error).__name__}: {str(error)[:300]})")
                 if s["status"] == "done" and not s["launched"] and not s.get("unmapped"):
                     if "launching_at" in s: log(f"{study}/{label}: a launch started at {s['launching_at']:.0f} was interrupted; checking the arm's reads before any relaunch")
                     s["launching_at"] = now(); write_json(path, state, atomic=True)
@@ -1026,10 +1259,12 @@ def watch(spec, interval=120, stagger=STAGGER, reads_timeout=6 * 3600):
         time.sleep(max(0.0, last[0] + stagger - time.time()))
         procs.extend(launch_arm_reads(spec, arm, stagger=stagger))
         last[0] = time.time()
-    unmapped = watch_studies(list(spec.get("studies", {})), on_done, interval=interval)
+    unmapped = watch_studies(list(spec.get("studies", {})), on_done, interval=interval, on_timeout=lambda study, label: continue_trial(spec, study, label))
     deadline = time.time() + reads_timeout
     finished = [a for a, x in spec["arms"].items() if x.get("trial") and (ROOT / x["trial"] / "result.json").exists()]
-    while (waiting := [a for a in finished if not all((ROOT / d / "rows.json").exists() for _, d in side_reads(spec, a, spec["rule"], "candidate", arm_side(spec, a)))]) and time.time() < deadline:
+    landed = lambda a: all((ROOT / d / "rows.json").exists() for tag, d in side_reads(spec, a, spec["rule"], "candidate", arm_side(spec, a))
+                           if not removed_suite(spec["reads"][tag].get("suite") or ""))   # a removed suite's read is never launched
+    while (waiting := [a for a in finished if not landed(a)]) and time.time() < deadline:
         if procs and all(p.poll() is not None for p in procs): break
         print(f"waiting for the reads of {waiting}", flush=True); time.sleep(interval)
     report = write_readout(spec)
@@ -1083,11 +1318,12 @@ def main(argv=None):
         if name in ("readout", "confirm"): p.add_argument("--out")
     a = ap.parse_args(argv)
     spec, root = load(a.spec), Path(getattr(a, "root", ROOT))
-    for line in calibration_warnings(spec, root) if a.cmd in ("validate", "launch") else ():
+    for line in [*calibration_warnings(spec, root), *continuation_warnings(spec, root)] if a.cmd in ("validate", "launch") else ():
         print(f"!!! warning: {line}")
     if a.cmd == "validate":
         problems, archived = validate(spec, root, partitions=a.partitions)
-        if archived: print(f"archived (on {spec['archive']}, not in this checkout):\n  " + "\n  ".join(archived))
+        where = f"on {spec['archive']}, not in this checkout" if spec.get("archive") else "not in this checkout"
+        if archived: print(f"archived ({where}):\n  " + "\n  ".join(archived))
         print("\n".join(problems) or f"round {spec['round']}: ok ({len(spec['arms'])} arms, {len(spec.get('studies', {}))} studies)")
         raise SystemExit(1 if problems else 0)
     if a.cmd == "readout":

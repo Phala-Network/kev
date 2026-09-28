@@ -2,7 +2,8 @@
 reproduction of the committed read-outs and verdicts of rounds 5-20 and 22 from saved rows, and round 20's temperature pools,
 transfer reads and checkpoint arms on a synthetic round; the calibration guards (a temperature pool that shares data with
 an arm's training is refused, every arm's temperature source is recorded, scripts/calibrate_checkpoint.py refuses
-in-distribution rows) and calibration by state length.
+in-distribution rows) and calibration by state length; removed suites (kev.suite.REMOVED_SUITES: scienthoon-v1, archived
+for the rounds that read it, refused after round 22), whose recorded reads reproduce from the committed rows.
 
 Offline vs archive. Rounds 5-18 ran on the research branch; their trial rows, reads and most committed outputs live on the
 git tag `research-archive-2026-09-24`, not on main. This checkout carries everything the round-5 read-out and the round-15
@@ -38,7 +39,55 @@ def test_every_round_spec_is_well_formed(path):
     spec = rounds.load(path)
     problems, archived = rounds.validate(spec, ROOT, rows=False)   # structure, suites, plans against their manifests, budgets
     assert problems == []
-    assert all("not in this checkout" in a for a in archived)       # plans and suites a recorded round names, kept on the tag
+    assert all("not in this checkout" in a for a in archived)       # plans and suites a recorded round names, kept on the tag; removed suites
+
+
+def test_a_removed_suite_is_refused_with_its_reason():
+    """scienthoon-v1 was removed on 2026-09-27 (kev.suite.REMOVED_SUITES): reading it says why, in any path form."""
+    from kev.suite import REMOVED_SUITES, RemovedSuite, load_split, read_manifest, removed_suite
+    assert REMOVED_SUITES["evals/external/scienthoon-v1"]["last_round"] == 22
+    assert not (ROOT / "evals/external/scienthoon-v1").exists()
+    for path in ("evals/external/scienthoon-v1", ROOT / "evals/external/scienthoon-v1", "/root/kev/evals/external/scienthoon-v1/"):
+        with pytest.raises(RemovedSuite, match="removed on 2026-09-27: unsound as a gate.*priority"):
+            load_split(path, "development")
+        with pytest.raises(RemovedSuite, match="removed on 2026-09-27"):
+            read_manifest(path)
+    assert removed_suite("evals/external/semif-v1") is None and read_manifest(ROOT / "evals/external/semif-v1")["files"]
+
+
+@pytest.mark.parametrize("number", [5, 14, 19, 22])
+def test_rounds_up_to_22_list_scienthoon_as_archived(number):
+    """A round that read scienthoon before its removal validates: the read is archived (with or without `archive`), not a
+    problem, and is reported only when plans are checked, like every other suite."""
+    spec = rounds.load(ROOT / f"experiments/rounds/r{number}.json")
+    problems, archived = rounds.validate(spec, ROOT, rows=False)
+    assert problems == [] and any(a.startswith("read scienthoon: evals/external/scienthoon-v1 not in this checkout: removed on 2026-09-27") for a in archived)
+    assert not any("scienthoon" in a for a in rounds.validate(spec, ROOT, rows=False, plans=False).archived)
+
+
+def test_a_round_after_22_that_reads_scienthoon_is_refused():
+    """Round 23 on: naming the removed suite is a problem with the reason, so validate and launch refuse the round."""
+    spec = {**rounds.load(ROOT / "experiments/rounds/r22.json"), "round": 23}
+    refusal = ("read scienthoon: evals/external/scienthoon-v1 was removed on 2026-09-27 and may not be read after round 22: "
+               + rounds.removed_suite("evals/external/scienthoon-v1")["reason"])
+    for kwargs in ({"rows": False}, {"rows": False, "plans": False}):
+        problems, archived = rounds.validate(spec, ROOT, **kwargs)
+        assert [p for p in problems if "scienthoon" in p] == [refusal] and not any("scienthoon" in a for a in archived)
+    assert refusal in rounds.launchable(spec)
+    without = {**spec, "reads": {t: r for t, r in spec["reads"].items() if t != "scienthoon"}}
+    assert not any("scienthoon-v1" in p for p in rounds.validate(without, ROOT, rows=False, plans=False).problems)
+
+
+def test_no_read_of_a_removed_suite_is_launched(tmp_path, capsys):
+    """A recorded round's missing scienthoon rows are never made again: read_commands skips the job and says why (skips,
+    not raises, so a watcher's launch does not fail and retry forever), and every other missing read still launches."""
+    spec = rounds.load(ROOT / "experiments/rounds/r22.json")
+    arm = next(iter(spec["arms"]))
+    [bench] = rounds.read_commands(spec, arm, root=tmp_path)
+    jobs = bench[bench.index("--jobs") + 1].split(",")
+    tags = [t for t, _ in rounds.side_reads(spec, arm, spec["rule"], "candidate", rounds.arm_side(spec, arm, tmp_path))]
+    assert "scienthoon" in tags and len(jobs) == len(tags) - 1 and not any("scienthoon" in j for j in jobs)
+    assert "not launching read scienthoon" in capsys.readouterr().out
 
 
 def test_validation_names_what_is_wrong():
@@ -95,7 +144,8 @@ def test_read_commands_batch_one_arm_and_skip_existing_reads(tmp_path):
     [bench] = rounds.read_commands(spec, "27b-r10k-lr2e5", root=tmp_path)
     assert bench[:4] == ["modal", "run", "--detach", "modal_app.py::benchmarks"] and bench[-4:] == ["--gpu", "H200", "--timeout", "14400"]
     jobs = bench[bench.index("--jobs") + 1].split(",")
-    assert len(jobs) == 7 and not any(j.endswith("-hard") for j in jobs)                          # hard exists locally
+    assert len(jobs) == 6 and not any(j.endswith("-hard") for j in jobs)                          # hard exists locally
+    assert not any("scienthoon" in j for j in jobs)                                              # a removed suite is never read again
     assert "/runs/r17-27b/00-trial-0/checkpoint@evals/devtools-v1@r17-27b-r10k-lr2e5-devtools" in jobs
     [locked] = rounds.read_commands(spec, "27b-r10k-lr2e5", stage="locked", root=tmp_path)
     assert locked[:3] == ["modal", "run", "modal_app.py::locked_test"] and locked[locked.index("--name") + 1] == "kev-27b-r17-ungated"
@@ -158,6 +208,153 @@ def test_watcher_gives_up_after_max_transient(tmp_path):
     def poll(cid): raise ConnectionRefusedError()
     rounds.watch_studies(["s"], lambda *a: None, poll=poll, sleep=lambda s: None, log=lambda m: None, root=tmp_path, max_transient=3)
     assert read_json(tmp_path / "runs/s.watch.json")["calls"]["trial-0"]["status"] == "failed"
+
+
+def _ledger(tmp_path, attempts, full_ft=True):
+    """A spawn record with the attempt ledger (modal_app.launch_detached): trial-0's attempts so far (call ids; None = a
+    pending entry, written before a spawn whose call was never recorded), the last one current."""
+    (tmp_path / "runs").mkdir(exist_ok=True)
+    entries = [{"nonce": f"n{i}", "call": c, "at": 0.0} for i, c in enumerate(attempts)]
+    write_json(tmp_path / "runs/s.spawn.json", {"name": "s", "calls": {"trial-0": attempts[-1]}, "attempts": {"trial-0": entries}, "bound_usd": 987.99,
+                                                "gpu": "H200:8", "timeout": 28800, "full_ft": full_ft, "modal_retries": 0})
+
+
+def _continue(tmp_path, new_call):
+    """A fake on_timeout: what modal_app.continue_full_trial does to the ledger (the next attempt becomes the current call)."""
+    def on_timeout(study, label):
+        record = read_json(tmp_path / f"runs/{study}.spawn.json")
+        record["attempts"][label].append({"nonce": new_call, "call": new_call, "at": 0.0}); record["calls"][label] = new_call
+        write_json(tmp_path / f"runs/{study}.spawn.json", record)
+    return on_timeout
+
+
+def test_watcher_continues_a_timed_out_trial_and_polls_the_new_call(tmp_path):
+    """Round 22: Modal's retries gave the trial two attempts of the three its bound counted. The watcher continues a call
+    that timed out itself: on_timeout records the next call in the spawn record, which the watcher then polls."""
+    _ledger(tmp_path, ["fc-0"])
+    script = {"fc-0": ["running", "timeout"], "fc-1": ["running", "done"]}
+    continued, launched, logs = [], [], []
+    def on_timeout(study, label):
+        continued.append(label); _continue(tmp_path, "fc-1")(study, label)
+    rounds.watch_studies(["s"], lambda study, label: launched.append(label), poll=lambda cid: script[cid].pop(0), sleep=lambda s: None,
+                         log=logs.append, root=tmp_path, on_timeout=on_timeout)
+    state = read_json(tmp_path / "runs/s.watch.json")["calls"]["trial-0"]
+    assert continued == ["trial-0"] and launched == ["trial-0"] and state["call"] == "fc-1" and state["status"] == "done" and state["launched"]
+    assert script == {"fc-0": [], "fc-1": []} and any("polling its continuation fc-1" in line for line in logs)
+
+
+def test_a_timeout_without_continuation_is_a_failure(tmp_path):
+    _ledger(tmp_path, ["fc-0"])
+    rounds.watch_studies(["s"], lambda *a: None, poll=lambda cid: "timeout", sleep=lambda s: None, log=lambda m: None, root=tmp_path)
+    assert read_json(tmp_path / "runs/s.watch.json")["calls"]["trial-0"]["status"] == "failed"   # no on_timeout: as before
+    (tmp_path / "runs/s.watch.json").unlink()
+    def spent(study, label): raise rounds.NoContinuation("3 of 3 attempts used")
+    rounds.watch_studies(["s"], lambda *a: None, poll=lambda cid: "timeout", sleep=lambda s: None, log=lambda m: None, root=tmp_path, on_timeout=spent)
+    state = read_json(tmp_path / "runs/s.watch.json")["calls"]["trial-0"]
+    assert state["status"] == "failed" and "3 of 3 attempts used" in state["error"] and "continuing_at" not in state
+
+
+def test_a_failed_continuation_is_retried_then_given_up(tmp_path):
+    _ledger(tmp_path, ["fc-0"])
+    asked = []
+    def flaky(study, label):
+        asked.append(label)
+        if len(asked) == 1: raise OSError("modal run lost the network")
+        _continue(tmp_path, "fc-1")(study, label)
+    script = {"fc-0": ["timeout"], "fc-1": ["done"]}
+    rounds.watch_studies(["s"], lambda *a: None, poll=lambda cid: script[cid].pop(0), sleep=lambda s: None, log=lambda m: None, root=tmp_path, on_timeout=flaky)
+    assert asked == ["trial-0", "trial-0"] and read_json(tmp_path / "runs/s.watch.json")["calls"]["trial-0"]["call"] == "fc-1"
+    (tmp_path / "runs/s.watch.json").unlink(); _ledger(tmp_path, ["fc-0"])
+    def broken(study, label): raise RuntimeError("refused")
+    rounds.watch_studies(["s"], lambda *a: None, poll=lambda cid: "timeout", sleep=lambda s: None, log=lambda m: None, root=tmp_path, on_timeout=broken, max_transient=3)
+    state = read_json(tmp_path / "runs/s.watch.json")["calls"]["trial-0"]
+    assert state["status"] == "failed" and "continuation failed 3 times" in state["error"]
+
+
+def test_a_restarted_watcher_adopts_a_continuation_it_did_not_see(tmp_path):
+    """The watcher died after the continuation was spawned (or it was spawned by hand with resume --trial): the spawn record
+    names the new call, so it is polled; nothing is spawned again."""
+    _ledger(tmp_path, ["fc-0", "fc-1"])
+    write_json(tmp_path / "runs/s.watch.json", {"calls": {"trial-0": {"status": "timeout", "launched": False, "transient": 0, "call": "fc-0", "continuing_at": 1.0}}})
+    polled = []
+    def never(study, label): raise AssertionError("continued twice")
+    rounds.watch_studies(["s"], lambda *a: None, poll=lambda cid: polled.append(cid) or "done", sleep=lambda s: None, log=lambda m: None, root=tmp_path, on_timeout=never)
+    assert polled == ["fc-1"] and read_json(tmp_path / "runs/s.watch.json")["calls"]["trial-0"]["launched"]
+
+
+def test_continue_trial_counts_attempts_against_the_admission_bound(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from kev.budget import FULL_FT_RETRIES, trial_attempts
+    monkeypatch.setattr(rounds, "ROOT", tmp_path)
+    spec = {"studies": {"s": {"suite": "evals/sft-v2-r22", "transfer": "evals/v4/transfer-v4", "gpu": "H200:8", "timeout": 28800}}, "app": "kev-sft"}
+    ran = []
+    def run(cmd, **kw):   # modal_app.py::resume --trial: spawns and records the next call
+        ran.append(cmd[cmd.index("--trial") + 1]); _continue(tmp_path, f"fc-{len(ran)}")("s", "trial-0"); return SimpleNamespace(returncode=0)
+    _ledger(tmp_path, ["fc-0"])
+    rounds.continue_trial(spec, "s", "trial-0", run=run)
+    rounds.continue_trial(spec, "s", "trial-0", run=run)
+    assert ran == ["trial-0", "trial-0"] and trial_attempts(read_json(tmp_path / "runs/s.spawn.json"), "trial-0") == (3, 1 + FULL_FT_RETRIES)
+    assert (tmp_path / "runs/s.continue-trial-0-2.log").exists() and (tmp_path / "runs/s.continue-trial-0-3.log").exists()
+    with pytest.raises(rounds.NoContinuation, match="3 of 3 attempts used"): rounds.continue_trial(spec, "s", "trial-0", run=run)
+    assert len(ran) == 2   # nothing spawned past the bound
+    _ledger(tmp_path, ["fc-0"])
+    with pytest.raises(rounds.NoContinuation, match="recorded no new call"): rounds.continue_trial(spec, "s", "trial-0", run=lambda cmd, **kw: SimpleNamespace(returncode=0))
+    with pytest.raises(RuntimeError, match="exited 1"): rounds.continue_trial(spec, "s", "trial-0", run=lambda cmd, **kw: SimpleNamespace(returncode=1))   # a refusal: asked again
+    _ledger(tmp_path, ["fc-0", "fc-1", None])   # the third attempt is pending: the command resolves it (adopts its call from the lease) before any budget verdict
+    def adopt(cmd, **kw):
+        record = read_json(tmp_path / "runs/s.spawn.json"); record["attempts"]["trial-0"][-1]["call"] = record["calls"]["trial-0"] = "fc-2"
+        write_json(tmp_path / "runs/s.spawn.json", record); return SimpleNamespace(returncode=1)   # adopted, then refused to spawn: it is running
+    rounds.continue_trial(spec, "s", "trial-0", run=adopt)
+    assert read_json(tmp_path / "runs/s.spawn.json")["calls"]["trial-0"] == "fc-2"
+    _ledger(tmp_path, ["fc-0"], full_ft=False)   # a LoRA trial has one attempt
+    with pytest.raises(rounds.NoContinuation, match="1 of 1"): rounds.continue_trial(spec, "s", "trial-0", run=run)
+    write_json(tmp_path / "runs/s.spawn.json", {"name": "s", "calls": {"trial-0": "fc-0"}, "bound_usd": 987.99, "timeout": 28800})   # round 22's record
+    with pytest.raises(rounds.NoContinuation, match="no attempt ledger"): rounds.continue_trial(spec, "s", "trial-0", run=run)
+
+
+def test_the_watcher_continues_refused_and_pending_attempts(tmp_path):
+    """A call the trial's lease refused never started, and a current attempt with no recorded call (a pending ledger
+    entry) may or may not have: both go to on_timeout, which resolves them against the ledger and the lease."""
+    _ledger(tmp_path, ["fc-0"])
+    script = {"fc-0": ["refused"], "fc-1": ["done"]}
+    asked = []
+    def on_timeout(study, label): asked.append(label); _continue(tmp_path, "fc-1")(study, label)
+    rounds.watch_studies(["s"], lambda *a: None, poll=lambda cid: script[cid].pop(0), sleep=lambda s: None, log=lambda m: None, root=tmp_path, on_timeout=on_timeout)
+    assert asked == ["trial-0"] and read_json(tmp_path / "runs/s.watch.json")["calls"]["trial-0"]["call"] == "fc-1"
+    (tmp_path / "runs/s.watch.json").unlink(); _ledger(tmp_path, [None]); asked.clear()
+    polled = []
+    rounds.watch_studies(["s"], lambda *a: None, poll=lambda cid: polled.append(cid) or "done", sleep=lambda s: None, log=lambda m: None, root=tmp_path, on_timeout=on_timeout)
+    assert asked == ["trial-0"] and polled == ["fc-1"]   # None is never polled
+
+
+def test_full_weight_studies_warn_that_the_watcher_continues_them(tmp_path):
+    (tmp_path / "plan.json").write_text('[{"full_ft": 1}]', encoding="utf-8"); (tmp_path / "lora.json").write_text('[{"lora": 16}]', encoding="utf-8")
+    spec = {"studies": {"full": {"plan": "plan.json"}, "lora": {"plan": "lora.json"}}}
+    [line] = rounds.continuation_warnings(spec, tmp_path)
+    assert line.startswith("study full is full-weight") and "kev.rounds watch" in line and "attached" in line
+
+
+def test_trial_attempts_reads_the_ledger():
+    from kev.budget import FULL_FT_RETRIES, trial_attempts
+    full = {"calls": {"t": "b"}, "attempts": {"t": [{"nonce": "x", "call": "a"}, {"nonce": "y", "call": "b"}]}, "full_ft": True, "modal_retries": 0}
+    assert trial_attempts(full, "t") == (2, 1 + FULL_FT_RETRIES)
+    assert trial_attempts({**full, "attempts": {}}, "t") == (1, 1 + FULL_FT_RETRIES)   # no list yet: the current call is the one attempt
+    assert trial_attempts({**full, "full_ft": False}, "t") == (2, 1)
+    legacy = {"calls": {"t": "a"}, "bound_usd": 987.99, "timeout": 28800}   # spawned with Modal's retries: unknown attempts, none left
+    assert trial_attempts(legacy, "t")[0] >= trial_attempts(legacy, "t")[1]
+
+
+def test_poll_modal_reports_a_timeout(monkeypatch):
+    import modal
+    class Call:
+        def __init__(self, error): self.error = error
+        def get(self, timeout): raise self.error
+    for error, status in ((modal.exception.FunctionTimeoutError("hit its timeout of 28800s"), "timeout"), (TimeoutError(), "running"),
+                          (modal.exception.OutputExpiredError(), "done")):
+        monkeypatch.setattr(modal.FunctionCall, "from_id", lambda cid, e=error: Call(e))
+        assert rounds.poll_modal("fc-0") == status
+    monkeypatch.setattr(modal.FunctionCall, "from_id", lambda cid: type("C", (), {"get": lambda self, timeout: {"label": "trial-0", "refused": "attempt 1 holds the trial"}})())
+    assert rounds.poll_modal("fc-0") == "refused"
 
 
 def test_transient_errors_are_network_errors_only():
@@ -429,6 +626,21 @@ def test_readout_reproduces_round_22():
     assert report["candidates"] == {"27b": None} and "!!!" not in rounds.table(report)
 
 
+def test_readout_reproduces_round_24():
+    """Round 24 (a retrospective selection over existing reads) reads a private exclusion list and private rows (every
+    tasksource-heldout-v1 read and the ood / agents-ood / guardrails-ood rows), restored from the private dataset their
+    manifests name; the test skips for an account without access. The CUAD by-length panel also needs longdoc-v1's private
+    development partition (kev.suite fetches it)."""
+    from scripts.private_rows import restore
+    try:
+        for manifest in ("runs/r24-readout/private-exclude.json", "runs/r24-readout/private-rows.json"): restore(manifest, ROOT)
+    except PermissionError as error:
+        pytest.skip(str(error))
+    report = rounds.readout(rounds.load(ROOT / "experiments/rounds/r24.json"), ROOT)
+    assert same(report, read_json(ROOT / "runs/r24-readout/round24.json"))
+    assert report["candidates"] == {"27b": "27b-r22-final"} and report["ranking"] == {"27b": ["27b-r22-final", "27b-r20a-w85"]}
+
+
 # --- temperature pools, transfer reads and checkpoints without a trial (round 20) -------------------------------------
 
 def _rows(root, d, ids, seed, scale=1.0, source="s"):
@@ -554,6 +766,101 @@ def test_validation_of_pools_transfer_reads_and_trialless_arms(tmp_path):
         assert expected in problems, expected
     del spec["temperature"]
     assert "arm x-wise: no trial, so no development rows to fit its temperature on" in "\n".join(rounds.validate(spec, tmp_path, rows=False, plans=False).problems)
+
+
+# --- panel exclusions, report-only panels and the temperature's interval (round 24) -----------------------------------
+
+def _excluding_round(root):
+    """The pool round with a main read of four sources on both sides (a, b, c, d; d's rows are task d1 or d2) and a private
+    exclusion list (sources c, record m/1) registered by path and sha256."""
+    from kev.suite import digest
+    spec = _pool_round(root)
+    for d, seed in (("runs/p-main", 5), ("runs/r99-x-trained-main", 6), ("runs/r99-x-wise-main", 7)):
+        rows = _rows(root, d, [f"m/{i}" for i in range(80)], seed)
+        for i, r in enumerate(rows): r.update(source="abcd"[i % 4], task="abcd"[i % 4] + ("2" if i % 8 == 7 else "1" if i % 4 == 3 else ""))
+        write_json(root / d / "rows.json", rows)
+    (root / "private").mkdir()
+    write_json(root / "private/exclude.json", {"salt": "x", "sources": ["c"], "ids": ["m/1"]})
+    spec["rule"]["panels"]["main"].update(exclude_sources=["a"], exclude_tasks=["d2"], exclude_file={"path": "private/exclude.json", "sha256": digest(root / "private/exclude.json")})
+    return spec
+
+
+def test_panel_exclusions_leave_both_sides_alike(tmp_path):
+    """exclude_sources, exclude_tasks and exclude_file drop the same rows from candidate and parent, so the paired delta is the
+    one on the kept rows; the panel records how many questions they removed."""
+    spec = _excluding_round(tmp_path)
+    assert rounds.validate(spec, tmp_path, plans=False).problems == []
+    wise = rounds.readout(spec, tmp_path)["arms"]["x-wise"]
+    kept = lambda r: r["source"] not in ("a", "c") and r["task"] != "d2" and r["id"] != "m/1"
+    side, parent = rounds.arm_side(spec, "x-wise", tmp_path), rounds.parent_side(spec, "x-wise", tmp_path)
+    c = [r for tag in ("main", "transfer") for r in side.served(tag) if kept(r)]
+    p = [r for tag in ("main", "transfer") for r in parent.served(tag) if kept(r)]
+    main = wise["panels"]["main"]
+    assert main["n"] == len(c) == 40 + 19 + 10 and main["excluded"] == 51   # transfer (40) + b (20 less m/1) + d1 (10); a, c and d2 removed
+    assert main["acc"]["delta"] == rounds.paired(c, p, "acc")["delta"] and main["acc"]["ci95"] == rounds.paired(c, p, "acc")["ci95"]
+    assert rounds.readout({**spec, "rule": {**spec["rule"], "panels": {"main": {k: v for k, v in spec["rule"]["panels"]["main"].items() if k not in rounds.EXCLUDE_KEYS}}}}, tmp_path)["arms"]["x-wise"]["panels"]["main"]["n"] == 120
+
+
+def test_an_exclude_file_is_checked_against_its_hash_and_may_be_absent(tmp_path):
+    """A private exclusion list is registered by its sha256: a changed file is refused; an absent one (no access) leaves the
+    arm incomplete and is listed like absent rows, never silently ignored."""
+    spec = _excluding_round(tmp_path)
+    write_json(tmp_path / "private/exclude.json", {"salt": "y", "sources": ["c"], "ids": ["m/1"]})
+    assert any("does not match its registered sha256" in p for p in rounds.validate(spec, tmp_path, plans=False).problems)
+    with pytest.raises(ValueError, match="does not match the sha256"):
+        rounds.readout(spec, tmp_path)
+    (tmp_path / "private/exclude.json").unlink()
+    problems, archived = rounds.validate(spec, tmp_path, plans=False)
+    assert any("exclude_file private/exclude.json not in this checkout" in p for p in problems)
+    assert any("exclude_file" in p for p in rounds.validate({**spec, "archive": "tag"}, tmp_path, plans=False).archived)
+    wise = rounds.readout(spec, tmp_path)["arms"]["x-wise"]
+    assert (wise["complete"], wise["passed"], wise["missing"]) == (False, False, ["exclude_file:private/exclude.json"])
+    assert rounds.validate(spec, tmp_path, rows=False, plans=False).problems == []   # structure only: the list may be private
+
+
+def test_malformed_filters_and_unknown_excluded_sources_are_problems(tmp_path):
+    spec = _excluding_round(tmp_path)
+    main = spec["rule"]["panels"]["main"]
+    main.update(exclude_sources=["mmlu", "emotoin"], exclude_tasks="d2", exclude_file={"path": "private/exclude.json"}, source=[])
+    problems = "\n".join(rounds.validate(spec, tmp_path, rows=False, plans=False).problems)
+    for expected in ("exclude_tasks is a non-empty list", "exclude_file is {path, sha256}", "source is a source name or a non-empty list"):
+        assert expected in problems, expected
+    assert "emotoin" not in problems   # "transfer" names no suite here (the arms' transfer_read differ), so the names cannot be checked
+    spec["transfer_read"] = "transfer4"   # one transfer read for the round: transfer-v4's manifest lists the sources
+    assert "exclude_sources name ['emotoin'], which no read of the panel lists" in "\n".join(rounds.validate(spec, tmp_path, rows=False, plans=False).problems)
+
+
+def test_an_optional_panel_is_reported_and_never_blocks(tmp_path):
+    """A report-only panel (optional) whose reads are absent leaves the comparison complete; a criterion or the rank may not
+    read one."""
+    spec = _pool_round(tmp_path)
+    spec["reads"]["extra"] = {"suite": "evals/v4/transfer-v4"}
+    spec["rule"]["panels"]["extra"] = {"reads": ["extra"], "metrics": ["acc"], "optional": True}
+    spec["parents"]["p"]["reads"]["extra"] = "runs/p-extra"
+    assert rounds.validate(spec, tmp_path, plans=False).problems == []   # the parent's optional read may be absent too
+    wise = rounds.readout(spec, tmp_path)["arms"]["x-wise"]
+    assert wise["complete"] and wise["passed"] is not None and "extra" not in wise["panels"]
+    assert wise["missing"] == [] and wise["missing_optional"] == ["candidate:runs/r99-x-wise-extra", "parent:runs/p-extra"]
+    _rows(tmp_path, "runs/p-extra", [f"e/{i}" for i in range(30)], 12); _rows(tmp_path, "runs/r99-x-wise-extra", [f"e/{i}" for i in range(30)], 13)
+    assert rounds.readout(spec, tmp_path)["arms"]["x-wise"]["panels"]["extra"]["n"] == 30
+    spec["rule"]["rank"] = [{"by": ["main.acc.delta", "extra.acc.delta"]}]
+    assert any("panel extra: optional (report only), but a criterion or the rank reads it" in p for p in rounds.validate(spec, tmp_path, rows=False, plans=False).problems)
+
+
+def test_the_pooled_temperature_carries_its_bootstrap_interval(tmp_path):
+    """temperature.ci adds each arm's percentile interval of its pooled T (cluster resamples within each source, the same grid
+    and objective); report only: the temperature, the panels and the verdict are unchanged."""
+    spec = _pool_round(tmp_path)
+    before = rounds.readout(spec, tmp_path)["arms"]["x-wise"]
+    spec["temperature"]["ci"] = {"level": 0.9, "samples": 200, "seed": 0}
+    assert rounds.validate(spec, tmp_path, plans=False).problems == []
+    after = rounds.readout(spec, tmp_path)["arms"]["x-wise"]
+    ci = after.pop("temperature_ci")
+    assert after == before
+    assert ci["lower"] <= after["temperature"] <= ci["upper"] and ci["lower"] < ci["upper"] and ci["questions"] == 110 and ci["samples"] == 200
+    assert rounds.pooled_temperature_ci(rounds.arm_side(spec, "x-wise", tmp_path).pool, tmp_path) == ci   # seeded
+    spec["temperature"]["ci"] = {"level": 90}
+    assert "temperature: ci is {level (0-1), samples (> 0), seed}" in rounds.validate(spec, tmp_path, rows=False, plans=False).problems
 
 
 # --- the temperature pool against training data (round 19's failure mode) ---------------------------------------------

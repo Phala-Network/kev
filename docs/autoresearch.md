@@ -52,6 +52,9 @@ A round is a PLAN.md section plus a spec, committed together before any training
    skills round, r20 for post-hoc arms without training: a temperature pool, interpolated checkpoints; r23 for blends toward another
    checkpoint, whose arms name `trained_on` for both endpoints' training). Leave out `"archive"`: that key marks the recorded rounds 5-18. Every plan file the spec names, and every
    parent read its rule needs, must exist in this checkout; if a parent lacks a read, `launch-reads <spec> --parents` makes it.
+   Drop every read of a removed suite (`kev.suite.REMOVED_SUITES`, with the reason): `evals/external/scienthoon-v1` was
+   removed on 2026-09-27, so from round 23 the scienthoon read, panel and guard go, and the pooled external panel is SemIf +
+   WANLI-v2 + TypeSafe. `validate` and `launch` refuse a round after the suite's last round that still names it.
 3. New data is a new directory under `evals/` with a `manifest.json` (sha256 per file, inputs' hashes). Under the SFT data
    policy (PLAN.md) private corpora keep only the manifest in git, with a `"mirror"` entry pointing at the private dataset.
 4. **MUST: every served or shipped temperature comes from a pool of held-out datasets, never from a partition of the training
@@ -153,6 +156,18 @@ and move to the next arm. Do not wait for a human.
 - **Watchers are local processes** and die with the machine or the network. Run them under `nohup` and `caffeinate`;
   restart `watch` after any interruption (it resumes from its state). It retries DNS and connection errors itself; a trial's
   own exception is a failure and is reported.
+- **Timed-out full-weight trials are continued by the watcher, not by Modal.** Trials spawn with Modal's retries off; when a
+  full-weight trial's call ends by its timeout, `watch` runs `modal_app.py::resume --trial <label>`, which spawns the next
+  attempt (it continues from the last committed resume point) with the GPU and timeout the study was admitted for and
+  records it in `runs/<study>.spawn.json` (`attempts`, at most 1 + `kev.budget.FULL_FT_RETRIES` per trial, the count the
+  admission bound was computed with; a trial whose current call is still running is never continued). While the watcher
+  is down nothing is continued: restart it and it picks the timeout up. Why: Modal charged each timed-out attempt twice
+  (the timeout, then the task it killed 30 s later), so `Retries(2)` gave round 22's trial two of its three attempts, and
+  the kill's retry can start beside a running attempt (`scripts/modal_retry_probe.py`). A study spawned before the ledger
+  has no count: `resume --trial <label> --beyond-bound` continues it by hand, outside any bound, and says so.
+  Two attempts never share a trial: each is recorded pending before its spawn, and each holds a lease on the `kev-leases`
+  volume (heartbeat every minute); a new attempt refuses while another's lease is fresh, and a continuation waits up to
+  `kev.budget.LEASE_STALE` (15 min) after a killed attempt's last heartbeat before it spawns.
 - **Network drops** kill local clients, not the remote work: a read whose client died has usually finished on Modal; pull
   its directory from the volume (`modal volume get kev-runs /<name> runs/<name>`) instead of relaunching it.
 - A failed benchmark or probe leaves its directory on the volume; retry under a new name.
@@ -207,6 +222,10 @@ At the end of the session (and in the state file as it goes):
 - **Long-context calibration.** A panel with `"by_length": true` reports accuracy, ECE, Brier and confident errors per
   state-token bucket (under 8k to 64k+, and the 8k+/16k+/32k+ tails), and a criterion can gate one
   (`long.ece_16k_plus.candidate <= 0.05`). Tokens are counted from the reads' suite records, so both sides share buckets.
+- **Suite fixes without a new suite version.** A panel can drop sources, tasks or a (private, hash-registered) list of ids
+  or sources on both sides (`exclude_sources`, `exclude_tasks`, `exclude_file`), and a report-only panel is marked
+  `"optional": true` so a missing report read never makes a candidate incomplete. Choose exclusions on label validity
+  before any read-out under them (round 24 took them from the 2026-09-27 audit), and never commit a private list.
 - **Workspace capacity.** The workspace has run at most about ten GPU containers at once; pending containers are capacity,
   not a bug, so do not relaunch them.
 - **Small suites.** A guard on 89 or 144 questions cannot resolve a 2-3 pp floor; gate them through a pooled panel.
