@@ -89,8 +89,13 @@ Title Case sections, API tables, Authors + License); model cards are formal.
   `results.jsonl` ledger, `--transfer <suite>` for an OOD read per trial, `--aggregate` to rank an existing directory,
   `--resume` for interrupted trials (evaluation; unfinished full-weight trials continue training from their resume point),
   `--wait-pid` to queue behind a training job). A full-weight trial runs under torchrun on every GPU of its container,
-  writes a resume point every `experiment.RESUME_MINUTES` and is retried by Modal after a timeout (`kev.budget`:
-  `FULL_FT_RETRIES`, up to 24 h per attempt, $1,000 per study; the bound counts every attempt); each retry continues.
+  writes a resume point every `experiment.RESUME_MINUTES` and is continued after a timeout by `kev.rounds watch`, not by
+  Modal (`kev.budget`: `FULL_FT_RETRIES` continuations, up to 24 h per attempt, $1,000 per study; the bound counts every
+  attempt): trials spawn with Modal's retries off, because Modal charged each killed timed-out attempt twice and gave
+  round 22's trial two of its three attempts (`scripts/modal_retry_probe.py`); `runs/<study>.spawn.json` is the attempt
+  ledger (`calls` = each trial's current call, `attempts` = all of them), and `modal_app.py::resume --trial <label>`
+  (`modal_app.continue_full_trial`, what `watch` runs) spawns the next attempt only after a call ended by a timeout,
+  within the ledger, with the study's GPU and timeout; `--beyond-bound` continues a trial without a ledger, uncounted. Each attempt is written to the ledger pending (a nonce) before its spawn; a pending entry blocks continuations until its call is adopted from the lease or it is `kev.budget.LEASE_STALE` old. The lease: every full-weight attempt holds `<study>/<trial>/attempt.json` on the `kev-leases` volume (`modal_app.TrialLease`: nonce, attempt, call id, heartbeat every `LEASE_HEARTBEAT` s from its own thread, marked ended on a clean exit); an attempt that finds another attempt's lease fresher than `LEASE_STALE` (900 s) returns `{"refused": ...}` without touching the trial, and `continue_full_trial` waits (bounded) for the old lease to end or go stale, so a continuation starts only after the old container is gone.
   It also keeps snapshots at `experiment.SNAPSHOT_FRACTIONS` (0.25, 0.5, 0.75 of its optimizer steps) in
   `<trial>/snapshots/step-<N>/checkpoint` (plan keys `snapshot_fractions` (a string, `"none"` for none) and
   `snapshot_every_steps`, which needs `max_steps` so `validated_trial` can check `MAX_SNAPSHOTS`; neither changes the
@@ -103,8 +108,8 @@ Title Case sections, API tables, Authors + License); model cards are formal.
   `modal_app.py::mirror_snapshots --study X [--paths /runs/...checkpoint] [--repo jaredpalmer/kev-snapshots] [--dry-run]`
   (re)uploads existing ones (a 27B checkpoint is ~51 GB; ask before mirroring those).
   The container commits the runs volume after every completed resume point and snapshot (a timeout skips the final commit); an attempt
-  that fails with an error writes `failed.json` and returns `{"failed": ...}` instead of raising, so it is not retried
-  (`kev.rounds.poll_modal` reports it as a failure). `modal_app.py::pull` (and `kev.rounds watch`) leaves full-weight
+  that fails with an error writes `failed.json` and returns `{"failed": ...}` instead of raising, so it is never continued
+  (`kev.rounds.poll_modal` reports it as a failure; a timeout it reports as `"timeout"`). `modal_app.py::pull` (and `kev.rounds watch`) leaves full-weight
   shards (`model*.safetensors` directly in a `checkpoint/` directory: final and snapshots) and resume points on the volume (`--weights` copies them);
   read a snapshot like any checkpoint: `::benchmarks --jobs "/runs/<study>/<trial>/snapshots/step-<N>/checkpoint@<suite>@<name>"`.
 - Rounds (every registered experiment since round 5): one spec per round, `experiments/rounds/r<N>.json`, committed before any
@@ -113,7 +118,7 @@ Title Case sections, API tables, Authors + License); model cards are formal.
   (panels of reads, bootstrapped metrics, criteria on paired bounds, rank) and confirmation stages. `kev/rounds.py` is the
   one engine: `uv run python -m kev.rounds {validate,launch,watch,launch-reads,readout,confirm} <spec>`; `watch` polls the
   spawned trials (state in `runs/<study>.watch.json`, resumable; DNS/connection errors retried, a trial's own exception is a
-  failure), pulls each finished trial's study (one pull per study at a time, `modal_app.pull_lock`) and launches its reads once (per-arm lock; the
+  failure, a timed-out full-weight trial gets its next attempt within the spawn record's ledger), pulls each finished trial's study (one pull per study at a time, `modal_app.pull_lock`) and launches its reads once (per-arm lock; the
   launch intent is written first to `runs/r<N>-reads-<arm>.json`, and an arm launched within its reads' timeout is not relaunched; a
   finished call that maps to no arm is logged and makes `watch` exit non-zero),
   60 s apart, then writes `runs/r<N>-readout/round<N>.json`; `confirm <spec> --stage <s>` writes `runs/r<N>-verdict/<size>-<s>.json`.
@@ -138,14 +143,24 @@ Title Case sections, API tables, Authors + License); model cards are formal.
   `"by_length": true` (or `{edges, tokenizer}`) adds acc / ECE / Brier / confident errors per state-token bucket
   (`kev.metrics.calibration_by_length`: under_8k, 8k_16k, 16k_32k, 32k_64k, 64k_plus and the tails 8k_plus/16k_plus/32k_plus;
   tokens = the encoded state segment, `<state>` included, as `kev.model.encode` builds it and `kev.serve` reports it, counted from the reads' suite records with `kev.suite.ADMISSION_TOKENIZER` unless given), and a criterion may read a
-  bucket (`long.ece_16k_plus.candidate <= 0.05`). An arm may be a checkpoint without a trial (`"checkpoint": "/runs/..."`, its "transfer" rows
-  from a `transfer_read`), e.g. a WiSE-FT interpolation (`scripts/interpolate_checkpoint.py`, `modal_app.py::interpolate`);
+  bucket (`long.ece_16k_plus.candidate <= 0.05`). Panel filters (round 24, `kev.rounds.panel_filter`; the same rows leave both sides):
+  `source` (a name or a list), `exclude_sources`, `exclude_tasks`, and `exclude_file` `{path, sha256}` (a JSON of `ids` /
+  `sources` / `tasks`, checked against its hash; a private list, e.g. tasksource-heldout families, stays out of git and is
+  restored with `scripts/private_rows.py`, so the public spec carries only the path and a salted file's sha256); `"optional": true`
+  marks a report-only panel that no criterion or rank may read and whose absent reads never leave an arm incomplete; the
+  `temperature` pool's `ci: {level, samples, seed}` adds each arm's bootstrap interval of its pooled T (`temperature_ci`). An arm may be a checkpoint without a trial (`"checkpoint": "/runs/..."`, its "transfer" rows
+  from a `transfer_read`), e.g. a WiSE-FT interpolation (`scripts/interpolate_checkpoint.py`, `modal_app.py::interpolate`: with the
+  base, or `--toward` another checkpoint of the same base and revision, full weights or a LoRA merged in fp32, `--blend_head` to blend the
+  pointer heads too; round 23);
   deltas are `kev.rounds.paired` (2,000 resamples, seed 0, micro). Rounds 5-18 are recorded specs (`"archive": "research-archive-2026-09-24"`): their plans, reads, data builders
   and per-round scripts live on that git tag, not on main; `validate` lists what this checkout lacks instead of failing, and
   `launch`/`watch`/`launch-reads` refuse a recorded round (a new round is a new spec, without `archive`, and must have its plans
-  and parents' reads). `tests/test_rounds.py` reproduces the committed read-outs of rounds 5-18 and verdicts of 8/10/11/12/15
+  and parents' reads). A read of a removed suite (`kev.suite.REMOVED_SUITES`: scienthoon-v1, last read by round 22) is listed as
+  archived for rounds up to its `last_round` (with or without `archive`; their read-outs come from the committed rows), refused for any
+  later round, and never launched again (`read_commands`, `load_split`). `tests/test_rounds.py` reproduces the committed read-outs of rounds 5-18 and verdicts of 8/10/11/12/15
   exactly; offline (CI) it runs round 5's read-out, round 15's locked verdict and round 20's six interpolated arms, whose rows are on main; round 19's read-out
-  (and round 20's whole read-out) runs where the private dataset is readable (its trials' `sft-v1` development rows: `scripts/private_rows.py`); every other case
+  (and round 20's whole read-out, and rounds 22's and 24's) runs where the private dataset is readable (round 19's trials' `sft-v1` development rows;
+  rounds 22's and 24's tasksource-heldout reads, round 24's exclusion list, and ood / agents / guardrails rows: `scripts/private_rows.py`); every other case
   skips unless `KEV_ROUNDS_ROOT` points at a checkout with the archived rows and outputs (the research checkout, or a worktree
   of the tag plus its gitignored trial rows). `kev.autoresearch
   session <specs> --spend-start X --spend-cap Y` runs registered rounds to their read-outs under a spend cap and never confirms;
@@ -156,8 +171,9 @@ Title Case sections, API tables, Authors + License); model cards are formal.
   Manifests pin dataset + base revisions and the sha256 of every partition. Current: `evals/v7/decision-v7` (the release
   recipe), `evals/v8/decision-v8`, `evals/v4/transfer-v4` and `evals/v9/transfer-v9` (MMLU-Pro, buried states,
   unknowable) for OOD, `evals/round3/{decision-r3,transfer-r3}` (calibration audit; the 1,260-record final panel was
-  read by the 2026-09-22 release confirmation and has been a short-state guard since round 11), `evals/smoke-v1` for tests, plus `evals/external/` (semif-v1, scienthoon-v1, ekzhang-mmlupro-v1, and SemIf's pinned third-party selections wanli-v1 + typesafe-v1 via
-  `scripts/freeze_semif_external.py`; `scripts/compare_typesafe.py` reports equal-case agreement/TVD against the reference and published answers, `--tokenizer` adds accuracy by state length; Kev-9B/4B scored 2026-09-22: WANLI 0.703/0.695 vs Jev 0.758, TypeSafe 0.809/0.856 agreement on 89 answered rows vs 0.891, `runs/kev-*-{wanli,typesafe}-v1`),
+  read by the 2026-09-22 release confirmation and has been a short-state guard since round 11), `evals/smoke-v1` for tests, plus `evals/external/` (semif-v1, ekzhang-mmlupro-v1, and SemIf's pinned third-party selections wanli-v1 + typesafe-v1 via
+  `scripts/freeze_semif_external.py`; `scripts/compare_typesafe.py` reports equal-case agreement/TVD against the reference and published answers, `--tokenizer` adds accuracy by state length; Kev-9B/4B scored 2026-09-22: WANLI 0.703/0.695 vs Jev 0.758, TypeSafe 0.809/0.856 agreement on 89 answered rows vs 0.891, `runs/kev-*-{wanli,typesafe}-v1`; `external/scienthoon-v1` was removed on 2026-09-27, unsound as a gate: `kev.suite.REMOVED_SUITES` refuses a read with the reason, and from round 23
+  no pooled-externals guard either: round 24's audited rule, which round 23 follows, reports SemIf, WANLI-v2 and TypeSafe without gating them (PLAN.md, standing rules)),
   `evals/night2/` (delta training data, `scripts/build_night2_data.py`), `evals/diagnostics/` (binding-v1), `evals/hard-v1`
   (programmatically labelled skill records in seven families: long policy documents, trade-offs, probability, multi-hop,
   temporal/numeric, judging a proposed answer, missing-fact abstention; `scripts/build_hard_v1.py` + `hard_v1_{common,policy,families,numeric}.py`,
@@ -347,8 +363,8 @@ runs / the endpoint / the volumes. Tests: `tests/test_skill_scripts.py`.
 - `kev/publish.py`   run -> Hub repo: adapter, head.pt, tokenizer, trial result/provenance/log, the card as README.md; `--tag`, `--revision`, `--private`
 - `modal_app.py`     every GPU entrypoint: trials, locked tests, probes, benches, anchors, smoke
 - `scripts/`         one-off builders and read-outs: `calibrate_checkpoint.py`, `build_night2_data.py`, `build_binding_diagnostic.py`,
-                     `freeze_{semif,scienthoon,calibration_audit}.py`, `{build,label,freeze}_documents_v*.py`, `calibration_audit.py`, `review_calibration_screen.py`,
-                     `compare_{q35,night2}.py`, `temperature_groups.py`, `base_mmlu_probe.py`, `scienthoon_drift.py` (round 20's scienthoon analysis), `plot_*.py` + `chartstyle.py`, `publish_space.sh`
+                     `freeze_{semif,calibration_audit}.py`, `{build,label,freeze}_documents_v*.py`, `calibration_audit.py`, `review_calibration_screen.py`,
+                     `compare_{q35,night2}.py`, `temperature_groups.py`, `base_mmlu_probe.py`, `plot_*.py` + `chartstyle.py`, `publish_space.sh`
 - `tests/test_api.py` conformance against the docs' example requests + official SDK
 
 ## Notes
