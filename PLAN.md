@@ -1631,6 +1631,124 @@ tasksource-heldout-v1 reads (rows and reports) and the ood / agents-ood / guardr
 serving check and the release temperature. The same caveat applies as for round 24: the candidate's short-state development
 read is round 22's final's, which missed the locked bar by 2 questions.
 
+### Round 23 confirmation
+
+**CONFIRMED, with the registered caveat.** `27b-k-w85` passes both stages. It passes the tests stage on all three criteria
+and the locked stage on both. Locked transfer-v4 accuracy is **0.8887 (583 of 656)** against the bar of 0.886, which needs
+582, so it clears by **1 question**. Kev-27B scores 0.8963 (588) on the same read, and round 22's final scored 0.8841 (580)
+in round 24. The test partitions and the locked read are the ones round 24 read, and this round's design reacted to that
+confirmation ("Reuse of the test partitions" above). A pass here is weaker evidence than round 24's reads would have been,
+and the release decision is Jared's. Nothing is published. Each confirmation read was made once, for the named candidate
+only. Verdicts: `runs/r23-verdict/27b-tests.json` and `runs/r23-verdict/27b-locked.json` (`python -m kev.rounds confirm
+experiments/rounds/r23.json --stage {tests,locked} --arm 27b-k-w85`). The candidate is served at its pool fit, 1.320 (648
+questions), and Kev-27B at its shipped 1.382. Kev-27B's test side is round 24's reads (`runs/r24c-27b-parent-<tag>`), not
+read again. Deltas are paired record-clustered bootstraps against Kev-27B (2,000 resamples, seed 0, micro), in pp.
+
+| stage / criterion (panel, n) | 27b-k-w85 | Kev-27B | Δ [95 %] | verdict |
+|---|---|---|---|---|
+| tests: breadth-v1 test acc, lower > 0 (without `routerbench`, `cfcolor`, `humicroedit`, `chessbench`; 2,489, 600 out) | 0.832 | 0.820 | +1.2 [+0.3, +2.2] | pass |
+| tests: tasksource-heldout-v1 test acc, lower > 0 (without the seven families; 2,024, 809 out) | 0.795 | 0.743 | +5.3 [+3.7, +6.8] | pass |
+| tests: pooled hard-v1 + devtools-v1 (without `flakeflagger`, `commitpackft_type`) + documents-v1 test acc, lower ≥ −1 (2,795, 300 out) | 0.889 | 0.800 | +8.9 [+7.5, +10.3] | pass |
+| **locked: transfer-v4 locked acc ≥ 0.886 (656)** | **0.8887 (583)** | 0.8963 (588) | −0.8 [−2.0, +0.5] | **pass** (needed 582) |
+| locked: served Brier ≤ 0.165 (656) | 0.1537 | 0.1604 | −0.007 [−0.018, +0.004] | pass |
+
+**Report-only test reads** (same exclusions; ECE as served):
+
+| panel (n) | 27b-k-w85 | Kev-27B | Δ [95 %] |
+|---|---|---|---|
+| hard-v1 test (1,088) | 0.918 | 0.749 | +16.9 [+14.2, +19.8] |
+| devtools-v1 test, gated sources (771) | 0.825 | 0.789 | +3.6 [+1.3, +5.9] |
+| documents-v1 test (936) | 0.908 | 0.869 | +4.0 [+2.1, +5.9] |
+| documents-v2, private held-out test (953) | 0.921 | 0.881 | +4.0 [+2.0, +6.1] |
+| breadth-v1 test, all 14 sources (3,089); ECE | 0.757; 0.019 | 0.749; 0.019 | +0.8 [−0.1, +1.8] |
+| breadth-v1 test ECE, gated panel | 0.015 | 0.013 | - |
+| tasksource-heldout-v1 test ECE, gated panel | 0.049 | 0.051 | - |
+| longdoc-v1 test CUAD acc (2,194) | 0.874 | 0.890 | **−1.6 [−3.0, −0.3]** |
+| longdoc-v1 test CUAD ECE | **0.053** | 0.007 | - |
+| CUAD by length, acc / ECE: < 8k (867) | 0.874 / 0.059 | 0.900 / 0.025 | - |
+| 8k-16k (443) | 0.880 / 0.052 | 0.892 / 0.028 | - |
+| 16k-32k (442) | 0.873 / 0.061 | 0.882 / 0.019 | - |
+| 32k-64k (442) | 0.867 / 0.060 | 0.876 / 0.014 | - |
+| 16k+ (884) | 0.870 / 0.059 | 0.879 / 0.013 | - |
+| longdoc-v1 test generated (2,400); ECE | 1.000; 0.001 | 1.000; 0.014 | - |
+| decision-v7 locked test acc (1,200; read by `locked_test`, not a criterion) | 0.866 | 0.870 | - |
+
+Against round 22's final on the same partitions (round 24's confirmation), the blend is within noise everywhere. It is a
+little lower on breadth-v1 test (+1.2 against +1.5 over Kev-27B) and on the breadth index. It is a little higher on the pooled
+panel (+8.9 against +8.6) and on locked transfer-v4 (583 against 580). CUAD test is still worse than Kev-27B: −1.6 [−3.0,
+−0.3] against round 22's −1.8, ECE 0.053 against 0.055. The development rule's CUAD guard (lower ≥ −2 pp) would not hold on
+test (−3.0). That is report only in this stage and changes no verdict. It is the contract-domain miscalibration round 24
+found, and the blend did not fix it.
+
+**Breadth index on TEST** (chance-corrected, all 14 sources; `scripts/breadth_report.py --bootstrap 2000`,
+`runs/r23-breadth-report/report.md`; the candidate's rows served at 1.320, Kev-27B's, Jev's and AutoJev's as round 24 read
+them, none read again): candidate **52.3 [49.2, 55.4]**, Kev-27B 50.2 [47.0, 53.2], round 22's final 53.7 [50.5, 56.7] (served
+at 1.382; this reproduces round 24's report exactly), Jev 54.0 [51.2, 57.0], AutoJev 50.0 [47.0, 53.3]. Against Kev-27B the
+candidate is +2.1 [−0.4, +4.6]; round 22's final was +3.5 [+1.0, +6.0]. Pooled ECE: candidate 0.019, Kev-27B 0.019. The
+candidate's gain is Retrieval & Classification (69.0 against 61.6) and Knowledge & Reasoning (33.8 against 31.7). It gives
+back Tools & Automation (62.9 against 65.1).
+
+**Calibration at the ends of the temperature interval** (report only, as in round 24: the candidate at the ends of its pooled
+T's 90 % interval [1.203, 1.447] and at the point fit, Kev-27B at 1.382; `runs/r23-verdict/27b-tests-t-interval.json`).
+ECE / Brier:
+
+| test panel (n) | T 1.203 | T 1.320 (served) | T 1.447 | Kev-27B @ 1.382 |
+|---|---|---|---|---|
+| breadth-v1, gated (2,489) | 0.026 / 0.2358 | 0.015 / 0.2347 | 0.021 / 0.2346 | 0.013 / 0.2516 |
+| breadth-v1, all 14 (3,089) | 0.029 / 0.3130 | 0.019 / 0.3120 | 0.020 / 0.3118 | 0.019 / 0.3267 |
+| tasksource-heldout-v1, gated (2,024) | 0.034 / 0.2970 | 0.049 / 0.2998 | 0.067 / 0.3038 | 0.051 / 0.3682 |
+| pooled hard + devtools + documents-v1 (2,795) | 0.019 / 0.1578 | 0.014 / 0.1584 | 0.024 / 0.1596 | 0.027 / 0.2720 |
+
+Round 24's pattern holds. At the low end breadth ECE rises to 0.026, and at the high end tasksource-heldout ECE rises to
+0.067. The two pull in opposite directions, and Brier moves by at most 0.004.
+
+**Serving check** (bf16, H200; passed; `runs/serving-27b-r23/report.json`, `runs/serving-27b-r23-long/report.json`):
+- Short states, 280 questions:
+  - CUDA graphs vs fp32: max |Δp| 0.0223, 0 flips. Eager bf16 vs fp32: 0.0216, 0 flips. Bars: ≤ 0.03, ≤ 1 flip.
+  - Graphs vs eager: 0.0270, 0 flips. Question isolation as served: 0.0039, 0 flips.
+- Long states, served vs benchmark, 3 records / 15 questions per length:
+  - 8k: max |Δp| 0.0064, 0 flips; new state 1.37 s, cached 599 ms; 70 GB peak.
+  - 32k: 0.0095, 0 flips; 4.17 s / 630 ms; 79 GB.
+  - 64k: 0.0017, 0 flips; 9.41 s / 733 ms; 87 GB.
+
+**Release temperature** (on a copy of `head.pt`; the checkpoint on the volume is unchanged):
+`scripts/calibrate_checkpoint.py --rows <r3cal rows>:composition_holdout,emotion,legacy_holdout,mmlu,paws,qnli,sciq,tweet_offensive
+--rows <v9 rows>:mmlu_pro --exclude_rows <transfer4 rows>` gives **1.3195**, the read-out's pool fit. Its 90 % interval is
+[1.203, 1.447] (648 questions; (source, group) clusters resampled within each source, 2,000 resamples, seed 0). On the fit rows,
+ECE goes 0.048 → 0.034. The out-of-fold estimate (5 group-disjoint folds, fold T 1.26-1.35) is 0.038 [0.028, 0.068], not
+separated from raw. transfer-v4 development (reported, not fitted): ECE 0.058 → 0.038. The fit checks the pool against the
+training that SFT `head.pt` records (sft-v2-r22 and its components). Kev-27B's decision-v7 / b1v2 were checked by
+`kev.rounds validate` (the arms' `trained_on`).
+
+**Deviations.** (i) The locked read was spawned at 20:38Z, about 1 min after the tests-stage reads (20:37Z). Both were
+launched after the result commit `cc5f346` (20:37Z), and the locked read finished (20:43Z) before the tests verdict. Round 24
+did the same, and Jared had asked to go faster. Neither verdict depends on the other, and no read was repeated. (ii) Modal
+apps: the locked read ran on a new deployment `kev-r23` (from `cc5f346`, `KEV_GPU=H200`), stopped once it was done. The test
+reads and serving checks ran as ephemeral `kev-r23` apps. `kev-sft` was not touched. (iii) The tasksource-heldout test rows
+were copied down by another client before this launcher pulled them, so the launcher's own pull refused to overwrite them.
+The local rows are byte-identical to the volume copy (sha256 `871e05bd…`).
+
+**Spend.** Modal metered, workspace-wide: $3,977.18 at 2026-09-28T23:14Z, after every round-23 job had ended. That is $190.12
+above the $3,787.06 read before the interpolations, before metering lag, and inside the registered projections (rule stage
+~$175; confirmation ~$15, against a $213.02 bound). AI Gateway: $0 (Jev's and AutoJev's breadth-v1 test reads are round 24's).
+
+**Evidence** (committed): the verdicts and the T-interval table (`runs/r23-verdict/`); the launch records
+(`runs/r23-reads-27b-k-w85-{tests,locked}.json`); the public test reads (`runs/r23c-27b-cand-<tag>`: rows for hard-v1,
+devtools-v1 and documents-v1, reports for breadth-v1, documents-v2 and longdoc-v1); the locked read
+(`runs/locked/kev-27b-r23-ungated/`); the test breadth report (`runs/r23-breadth-report/`); the serving reports. Private
+(`jaredpalmer/kev-private-train` under `runs/r23/`, `scripts/private_rows.py restore`): tasksource-heldout-v1 test rows and
+report, breadth-v1 test rows and documents-v2 rows (`runs/r23-verdict/private-rows.json`, @ `bab8219f`), and longdoc-v1 test
+rows (`runs/r23-verdict/private-rows-longdoc.json`, @ `ebf2b333`).
+
+**For Jared.** `27b-k-w85` (`/runs/r23-wise/27b-k-w85/checkpoint`, weights `d27af6ab…`) is the first 27B full-weight
+checkpoint to pass a registered confirmation. It is not published. If it is released, it ships at T 1.3195, written with
+`scripts/calibrate_checkpoint.py` into the released `head.pt`. Four points are worth weighing:
+- it passed the locked bar by 1 question, 0.8 pp below Kev-27B;
+- on CUAD test it is worse (−1.6 pp, ECE 0.053 against 0.007);
+- the test partitions were not untouched for this question;
+- it is still 0.85 round 22's final, and the blend recovered almost none of Kev-27B's short-state or CUAD behaviour
+  ("What the blends did").
+
 ## Next
 
 Goals and open questions, not registered rounds; each becomes a spec and a PLAN section before it runs.
