@@ -1,0 +1,188 @@
+{
+  "round": 24,
+  "stage": "tests",
+  "arm": "27b-r22-final",
+  "trial": null,
+  "parent": "runs/r6-27b-v2/01-trial-1",
+  "checkpoint": "/runs/r22-27b-lr2e6/00-trial-0/checkpoint",
+  "temperature": 1.381912879967776,
+  "parent_temperature": 1.381912879967776,
+  "panels": {
+    "breadthtest": {
+      "n": 2489,
+      "excluded": 600,
+      "acc": {
+        "candidate": 0.8352752109280835,
+        "parent": 0.8204098031337886,
+        "delta": 0.014865407794294905,
+        "ci95": [
+          0.005191693290734875,
+          0.02477126687670675
+        ]
+      },
+      "ece": {
+        "candidate": 0.014449884214276044,
+        "parent": 0.013406477080733668
+      }
+    },
+    "tshtest": {
+      "n": 2024,
+      "excluded": 809,
+      "acc": {
+        "candidate": 0.7959486166007905,
+        "parent": 0.7425889328063241,
+        "delta": 0.05335968379446643,
+        "ci95": [
+          0.03696020798364396,
+          0.06962970126799922
+        ]
+      },
+      "ece": {
+        "candidate": 0.05476022189792311,
+        "parent": 0.05057204896925643
+      }
+    },
+    "pooled": {
+      "n": 2795,
+      "excluded": 300,
+      "acc": {
+        "candidate": 0.8855098389982111,
+        "parent": 0.8,
+        "delta": 0.08550983899821107,
+        "ci95": [
+          0.07075361646507462,
+          0.10000088999643998
+        ]
+      }
+    },
+    "breadthtest_index": {
+      "n": 3089,
+      "acc": {
+        "candidate": 0.761735189381677,
+        "parent": 0.7484622855292975,
+        "delta": 0.013272903852379447,
+        "ci95": [
+          0.003575466609953948,
+          0.023208578902206626
+        ]
+      },
+      "ece": {
+        "candidate": 0.016769014017681494,
+        "parent": 0.0186942088770611
+      }
+    },
+    "hardtest": {
+      "n": 1088,
+      "acc": {
+        "candidate": 0.9163602941176471,
+        "parent": 0.7490808823529411,
+        "delta": 0.16727941176470595,
+        "ci95": [
+          0.14035365833073096,
+          0.1965456509191181
+        ]
+      }
+    },
+    "devtest": {
+      "n": 771,
+      "excluded": 300,
+      "acc": {
+        "candidate": 0.814526588845655,
+        "parent": 0.788586251621271,
+        "delta": 0.025940337224383936,
+        "ci95": [
+          0.0013173503799750962,
+          0.04884475919180281
+        ]
+      }
+    },
+    "docs1test": {
+      "n": 936,
+      "acc": {
+        "candidate": 0.9081196581196581,
+        "parent": 0.8685897435897436,
+        "delta": 0.0395299145299145,
+        "ci95": [
+          0.020298603699751016,
+          0.06021505376344083
+        ]
+      }
+    },
+    "docs2": {
+      "n": 953,
+      "acc": {
+        "candidate": 0.919202518363064,
+        "parent": 0.881427072402938,
+        "delta": 0.03777544596012594,
+        "ci95": [
+          0.01684210526315788,
+          0.059815844700944386
+        ]
+      }
+    }
+  },
+  "missing": [],
+  "temperature_fit": {
+    "reads": [
+      "runs/r22-27b-lr2e6-r3cal",
+      "runs/r22-27b-lr2e6-v9"
+    ],
+    "sources": {
+      "runs/r22-27b-lr2e6-v9": [
+        "mmlu_pro"
+      ],
+      "runs/r22-27b-lr2e6-r3cal": [
+        "composition_holdout",
+        "emotion",
+        "legacy_holdout",
+        "mmlu",
+        "paws",
+        "qnli",
+        "sciq",
+        "tweet_offensive"
+      ]
+    },
+    "exclude_reads": [
+      "runs/r22-27b-lr2e6-transfer4"
+    ],
+    "questions": 648,
+    "excluded_questions": 0
+  },
+  "temperature_ci": {
+    "level": 0.9,
+    "samples": 2000,
+    "seed": 0,
+    "lower": 1.2311444133449163,
+    "upper": 1.4810975522865641,
+    "questions": 648,
+    "resampled": "(source, group) clusters within each source (kev.metrics.cluster_resamples)"
+  },
+  "temperature_source": {
+    "kind": "pool",
+    "reads": [
+      "runs/r22-27b-lr2e6-r3cal",
+      "runs/r22-27b-lr2e6-v9"
+    ],
+    "questions": 648
+  },
+  "parent_temperature_source": {
+    "kind": "trial development rows",
+    "rows": "runs/r6-27b-v2/01-trial-1/development",
+    "suite": "evals/v7/decision-v7",
+    "training_corpus": true,
+    "shipped": 1.381912879967776
+  },
+  "missing_optional": [
+    "candidate:runs/r24c-27b-cand-longdoctest",
+    "parent:runs/r24c-27b-parent-longdoctest",
+    "candidate:runs/r24c-27b-cand-longdoctest",
+    "parent:runs/r24c-27b-parent-longdoctest"
+  ],
+  "criteria": {
+    "breadthtest_lower_above_0": true,
+    "tshtest_lower_above_0": true,
+    "pooled_lower_at_least_minus_1pp": true
+  },
+  "complete": true,
+  "passed": true
+}
