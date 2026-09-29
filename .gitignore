@@ -282,6 +282,10 @@ evals/tasksource-heldout-v1/*.jsonl
 evals/sft-v2/*.jsonl
 evals/sft-v2-r21/*.jsonl
 evals/sft-v2-r22/*.jsonl
+# sft-v2-r25 (round 25's training suite, derived from sft-v2-r22 by kev-sft assemble/derive_r25.py): partitions only in jaredpalmer/kev-private-train
+evals/sft-v2-r25/*.jsonl
+# sft-v2-r26 (round 26's training suite: sft-v2-r25 + 13,000 tasksource-v1 records, from sft-v2-r21 by kev-sft assemble/derive_r26.py): partitions only in jaredpalmer/kev-private-train
+evals/sft-v2-r26/*.jsonl
 # eval-only suites set aside by sft-v2's components; partitions live only in jaredpalmer/kev-private-evals
 evals/ood-v2/*.jsonl
 evals/agents-ood-v1/*.jsonl
@@ -344,3 +348,113 @@ runs/r22-27b-lr2e6/00-trial-0/transfer/*
 runs/r22-27b-lr2e6/00-trial-0/calibration/*
 !runs/r22-27b-lr2e6/00-trial-0/calibration/temperature.json
 !runs/r22-27b-lr2e6/00-trial-0/snapshots/
+# round 23 (experiments/rounds/r23.json): the read-out, its table and private-rows manifest; each candidate's
+# interpolation report (runs/r23-wise/<arm>/interpolation.json; the checkpoints stay on the kev-runs volume); the read
+# launch records; every public-suite read's report + rows; the ood-v2 / agents-ood-v1 / guardrails-ood-v1 reads' reports
+# (aggregates only). Private (jaredpalmer/kev-private-train runs/r23/, runs/r23-readout/private-rows.json,
+# scripts/private_rows.py restore): every tasksource-heldout-v1 read (its rows and report name the private families) and
+# the ood / agents-ood / guardrails-ood rows. Confirmation (runs/r23-verdict/, runs/r23c-*): as round 24's.
+!runs/r23-readout/
+runs/r23-readout/*
+!runs/r23-readout/round23.json
+!runs/r23-readout/readout.txt
+!runs/r23-readout/tables.md
+!runs/r23-readout/private-rows.json
+!runs/r23-wise/
+!runs/r23-wise/*/
+runs/r23-wise/*/*
+!runs/r23-wise/*/interpolation.json
+!runs/r23-reads-*.json
+!runs/r23-27b-*/
+runs/r23-27b-*/*
+!runs/r23-27b-*/report.json
+!runs/r23-27b-*/rows.json
+runs/r23-27b-*-tsheld/
+runs/r23-27b-*-ood/rows.json
+runs/r23-27b-*-agentsood/rows.json
+runs/r23-27b-*-guardood/rows.json
+# tasksource-heldout-v1 test reads (rounds 23 and 24's confirmations): private, never in git
+runs/r24c-*-tshtest/
+runs/r23c-*-tshtest/
+# round 23's confirmation of 27b-k-w85: the verdicts, the T-interval table and the private-rows manifests; the launch
+# records (runs/r23-reads-*-{tests,locked}.json, above); the public test reads (rows for hard-v1, devtools-v1 and
+# documents-v1, reports for breadth-v1, documents-v2 and longdoc-v1); the locked read; the test breadth report; the serving
+# reports. Private (jaredpalmer/kev-private-train runs/r23/): tasksource-heldout-v1 test rows and report, breadth-v1 test
+# rows, documents-v2 rows (runs/r23-verdict/private-rows.json) and longdoc-v1 test rows (private-rows-longdoc.json).
+!runs/r23-verdict/
+runs/r23-verdict/*
+!runs/r23-verdict/27b-tests.json
+!runs/r23-verdict/27b-locked.json
+!runs/r23-verdict/27b-tests-t-interval.json
+!runs/r23-verdict/private-rows.json
+!runs/r23-verdict/private-rows-longdoc.json
+!runs/r23c-27b-cand-*/
+runs/r23c-27b-cand-*/*
+!runs/r23c-27b-cand-*/report.json
+!runs/r23c-27b-cand-hardtest/rows.json
+!runs/r23c-27b-cand-devtest/rows.json
+!runs/r23c-27b-cand-docs1test/rows.json
+!runs/r23-breadth-report/
+runs/r23-breadth-report/*
+!runs/r23-breadth-report/report.md
+!runs/r23-breadth-report/report.json
+!runs/serving-27b-r23/
+runs/serving-27b-r23/*
+!runs/serving-27b-r23/report.json
+!runs/serving-27b-r23-long/
+runs/serving-27b-r23-long/*
+!runs/serving-27b-r23-long/report.json
+!runs/locked/kev-27b-r23-ungated/
+runs/locked/kev-27b-r23-ungated/*
+!runs/locked/kev-27b-r23-ungated/summary.json
+!runs/locked/kev-27b-r23-ungated/transfer/
+runs/locked/kev-27b-r23-ungated/transfer/*
+!runs/locked/kev-27b-r23-ungated/transfer/rows.json
+runs/r23c-*-tshtest/
+# round 25 (experiments/rounds/r25.json): the read-out (round25.json, readout.txt, tables.md), its report-only extras
+# (vs-w85*, breadth-ece-by-t.json, transfer4-vs-parent.json and the scripts that wrote them) and private-rows manifest;
+# the read launch records; every public-suite read's report + rows; the ood-v2 / agents-ood-v1 / guardrails-ood-v1 reads'
+# reports (aggregates only); each trial's provenance.json, result-public.json (result.json without the per-task table),
+# in-trial transfer rows, in-trial calibration temperature, training metrics and the snapshot.json records. Private
+# (jaredpalmer/kev-private-train runs/r25/, runs/r25-readout/private-rows.json, scripts/private_rows.py restore): every
+# tasksource-heldout-v1 read (rows and report), the ood / agents-ood / guardrails-ood rows, both trials' development rows
+# and full result.json. Checkpoints (~51 GB each) stay on the kev-runs volume.
+!runs/r25-readout/
+runs/r25-readout/*
+!runs/r25-readout/round25.json
+!runs/r25-readout/readout.txt
+!runs/r25-readout/tables.md
+!runs/r25-readout/vs-w85.md
+!runs/r25-readout/vs-w85-*.json
+!runs/r25-readout/breadth-ece-by-t.json
+!runs/r25-readout/transfer4-vs-parent.json
+!runs/r25-readout/private-rows.json
+!runs/r25-readout/r25-*.py
+!runs/r25-reads-*.json
+!runs/r25-27b-*/
+runs/r25-27b-*/*
+!runs/r25-27b-*/report.json
+!runs/r25-27b-*/rows.json
+runs/r25-27b-*-tsheld/
+runs/r25-27b-*-ood/rows.json
+runs/r25-27b-*-agentsood/rows.json
+runs/r25-27b-*-guardood/rows.json
+!runs/r25-27b-lr1e6/00-trial-0/
+!runs/r25-27b-lr2e6/00-trial-0/
+runs/r25-27b-lr*e6/00-trial-0/*
+!runs/r25-27b-lr*e6/00-trial-0/provenance.json
+!runs/r25-27b-lr*e6/00-trial-0/result-public.json
+!runs/r25-27b-lr*e6/00-trial-0/transfer/
+runs/r25-27b-lr*e6/00-trial-0/transfer/*
+!runs/r25-27b-lr*e6/00-trial-0/transfer/rows.json
+!runs/r25-27b-lr*e6/00-trial-0/calibration/
+runs/r25-27b-lr*e6/00-trial-0/calibration/*
+!runs/r25-27b-lr*e6/00-trial-0/calibration/temperature.json
+!runs/r25-27b-lr*e6/00-trial-0/checkpoint/
+runs/r25-27b-lr*e6/00-trial-0/checkpoint/*
+!runs/r25-27b-lr*e6/00-trial-0/checkpoint/training_metrics.json
+!runs/r25-27b-lr*e6/00-trial-0/snapshots/
+!runs/r25-27b-lr*e6/00-trial-0/snapshots/*/
+!runs/r25-27b-lr*e6/00-trial-0/snapshots/*/checkpoint/
+runs/r25-27b-lr*e6/00-trial-0/snapshots/*/checkpoint/*
+!runs/r25-27b-lr*e6/00-trial-0/snapshots/*/checkpoint/snapshot.json
