@@ -2554,6 +2554,39 @@ Checkpoints (~51 GB each: 3 snapshots + the final) stay on the `kev-runs` volume
 - **Short-state drift tracks the replay share.** Transfer-r3 test fell against round 25 when replay went from 30.2 % to
   23.5 %. Any further continued-SFT round from Kev-27B should hold the replay share, not the replay count.
 
+## Round 27 (registered)
+
+**Question.** Is round 18's 9B documents-and-skills delta a Kev-9B candidate under the audited rule? Round 18 (2026-09-24)
+selected no 9B candidate: arm (a) passed both primaries (skills +19.0, documents +7.0) and failed only WANLI-v2, scienthoon
+and the pooled externals, all since removed or ungated (scienthoon removed, the audit, "WANLI and TypeSafe removed").
+Round 18's verdict stands; this is a new, registered selection over its two finished trials, with no training.
+
+**Arms** (checkpoints on the volume; their development reads from round 18, unchanged): `9b-r18a` =
+`runs/r18-9b/00-trial-0` (lr 2e-5), `9b-r18b` = `runs/r18-9b/01-trial-1` (lr 1e-5); parent the released Kev-9B
+(`jaredpalmer/kev-9b@2629c06a`, `night2-9b-du/00-trial-0`, its round-18 reads).
+
+**Rule** (round 18's, with the 2026-09-27 audit's verdicts applied as in round 24): primaries hard-v1 + devtools-v1
+development pooled accuracy lower > 0 and documents-v1 development lower > 0; guards: short state (transfer-v4 dev +
+transfer-r3 test, without `emotion`) accuracy lower ≥ −2 pp, Brier upper ≤ +0.02, confident errors upper ≤ +1 pp;
+unknowable share ≤ 0.05 (transfer-v9); hard-v1 ECE ≤ the parent's + 0.01. devtools-v1 drops `flakeflagger` and the
+`commitpackft_type` task in every panel (the audit's Kev-panel exclusions). No WANLI, TypeSafe, scienthoon or pooled
+external read; SemIf is reported (optional). Candidate: the passing arm with the larger sum of the two primary estimates.
+
+**Temperature.** Every arm is served at one temperature fitted on round 24's held-out pool (transfer-r3 calibration's
+eight sources + transfer-v9's `mmlu_pro`, 90 % bootstrap interval; standing rule: never an in-distribution partition),
+not the in-distribution T each trial's head carries. `trained_on` lists decision-v7, documents-v1 and round10/skills
+(round15/joint is their concatenation); it leaves out `evals/night2` (the released Kev-9B's delta), whose manifest lists
+no sources, so the engine cannot check it: its records are four synthetic families (`night2_dates`, `night2_assertion`,
+`night2_unknowable`, `night2_unknowable_control`), none in the pool. The parent keeps its shipped T 2.30.
+
+**Confirmation** (round 18's, with the same exclusions): hard-v1 + devtools-v1 test pooled lower > 0 and documents-v1 test
+lower > 0 (documents-v2 reported); locked transfer-v4 accuracy ≥ parent − 1 pp and served Brier ≤ parent + 0.005.
+
+**Not blind.** The development reads were made on 2026-09-24 and their headline numbers are in "Round 18 result"; the
+WANLI analysis that removed WANLI-v2 compared arm (a) with the parent. Selecting between two finished arms on reads already
+seen is optimistic; the untouched test partitions and the locked read are the guard. Publishing a new Kev-9B still needs
+Jared's explicit OK.
+
 ## Next
 
 Goals and open questions, not registered rounds; each becomes a spec and a PLAN section before it runs.
