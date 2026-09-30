@@ -112,7 +112,7 @@ moves p by up to 0.03-0.06.
 The drift comes from an intended environment change, so there is nothing to fix in kev. The TF32 gap in the eval
 contract is real, but closing it (IEEE Triton dots in `LocalPredictor`) would move every future Qwen3.5 read by up to
 0.003 in p against every committed read, which is a policy decision (and a speed cost), not a fix. AGENTS.md now says what
-the contract covers. Report reads should record their kernel set; see the follow-up PR.
+the contract covers. #191 makes report.json record the kernel set a read ran on.
 
 ## Spend
 
