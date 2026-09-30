@@ -294,7 +294,7 @@ def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
             if self.fail == "other": raise ValueError("not memory")
             return [[torch.tensor([0.5, 0.5])] for _ in encs], [("prefix", self.calls) if k else None for k in keep]
 
-    enc = lambda state: {"ids": list(state) + [9], "seg": [0] * len(state) + [1]}
+    enc = lambda state: {"ids": list(state) + [9], "seg": [0] * len(state) + [1], "state_tokens": len(state)}
     model = Model()
     s = Server(SimpleNamespace(release_date=lambda: "2026-01-01"), None, model, "cpu")
     try:
@@ -382,6 +382,119 @@ def test_bearer_auth_and_request_id(monkeypatch):
         assert client.get("/v1/models").status_code == 401
         assert client.get("/v1/models", headers={"authorization": "Bearer wrong"}).status_code == 401
         assert client.get("/openapi.json").status_code == 200   # only /v1 is gated
+
+
+# --- serving admission (kev.model.admit through kev.serve.Server.submit): refuse an over-length state, never cut it silently
+
+@pytest.fixture(scope="module")
+def tiny_model(tiny_base):
+    """The tiny hybrid base as a DecisionModel (random pointer head) and its tokenizer, on CPU in fp32."""
+    from transformers import AutoTokenizer
+    tok = AutoTokenizer.from_pretrained(tiny_base / "base")
+    torch.manual_seed(0)
+    return tok, DecisionModel(str(tiny_base / "base"), tok, "cpu").eval()
+
+
+LIMIT, ROW = 8, 64   # the serving limits in these tests: <state> + 7 words ("it" is one token of the tiny vocabulary), and a 64-token row
+
+
+@pytest.fixture
+def tiny_serve(tiny_model, monkeypatch):
+    """-> post(body, truncate=False) -> (status, json) against /v1/systemone on the tiny model, with the serving limits
+    shrunk to LIMIT state tokens and a ROW-token row (state + one question), and the Server behind each call."""
+    from fastapi.testclient import TestClient
+    import kev.model as M
+    from kev import serve
+    tok, model = tiny_model
+    monkeypatch.setattr(M, "SERVE_MAX_STATE", LIMIT); monkeypatch.setattr(M, "SERVE_MAX_BRANCH", ROW); monkeypatch.setattr(serve, "SERVE_MAX_STATE", LIMIT)
+    servers = {}
+
+    def post(body, truncate=False, path="/v1/systemone"):
+        if truncate not in servers: servers[truncate] = serve.Server(SimpleNamespace(release_date=lambda: "2026-01-01"), tok, model, "cpu", truncate_states=truncate)
+        monkeypatch.setattr(serve, "server", lambda: servers[truncate])
+        with TestClient(serve.app) as client:
+            r = client.post(path, json=body)
+        return r.status_code, r.json()
+    yield post
+    for s in servers.values(): s.close()
+
+
+def request(words, instructions="which team"):
+    return {"state": " ".join(["it"] * words), "model": "kev-latest",
+            "questions": {"team": {"type": "choice", "instructions": instructions, "criteria": {"billing": None, "shipping": None, "refund": None}}}}
+
+
+def test_serve_refuses_an_over_length_state(tiny_serve):
+    """The default: a state one token over the limit is a 422 that says how long it is, the limit, and how to fix it
+    (the TypeSafe SDKs raise it as TypeSafeUnprocessableEntityError with this text: tests/test_api.py)."""
+    code, body = tiny_serve(request(LIMIT))            # <state> + LIMIT words = LIMIT + 1 tokens
+    assert code == 422
+    assert body["detail"].startswith(f"state is {LIMIT + 1} tokens, over the {LIMIT}-token limit (the <state> token included)")
+    assert "split it across requests" in body["detail"] and "KEV_TRUNCATE_STATES=1" in body["detail"]
+
+
+def test_serve_admits_a_state_exactly_at_the_limit(tiny_serve):
+    """LIMIT tokens with <state> is admitted and read whole; a server that cannot truncate keeps the TypeSafe body as it was."""
+    code, body = tiny_serve(request(LIMIT - 1))
+    assert code == 200 and set(body) == {"model", "answers", "usage", "latency_ms"} and set(body["usage"]) == {"input_tokens", "output_tokens"}
+    code, opted = tiny_serve(request(LIMIT - 1), truncate=True)
+    assert code == 200 and opted["truncated"] is False and (opted["usage"]["state_tokens"], opted["usage"]["state_tokens_used"]) == (LIMIT, LIMIT)
+    assert opted["answers"] == body["answers"] and opted["usage"]["input_tokens"] == body["usage"]["input_tokens"]
+
+
+def test_serve_truncates_only_when_opted_in_and_says_so(tiny_serve):
+    """KEV_TRUNCATE_STATES=1 (Server.truncate_states): the over-length state is read to its first LIMIT tokens, the answers
+    are those of the cut state, and the response carries truncated: true with both counts; /separate reports it too."""
+    code, body = tiny_serve(request(LIMIT + 5), truncate=True)
+    assert code == 200 and body["truncated"] is True
+    assert (body["usage"]["state_tokens"], body["usage"]["state_tokens_used"]) == (LIMIT + 6, LIMIT)
+    code, cut = tiny_serve(request(LIMIT - 1), truncate=True)   # the same state cut by hand to LIMIT tokens
+    assert body["answers"] == cut["answers"] and body["usage"]["input_tokens"] == cut["usage"]["input_tokens"]
+    code, sep = tiny_serve(request(LIMIT + 5), truncate=True, path="/v1/systemone/separate")
+    assert code == 200 and sep["truncated"] is True and sep["usage"]["state_tokens"] == LIMIT + 6
+
+
+def test_serve_refuses_a_long_question_either_way(tiny_serve):
+    """A question row (state + branch) over SERVE_MAX_BRANCH stays a 422 with or without truncation, and its message does
+    not offer KEV_TRUNCATE_STATES (cutting the state is not what it needs)."""
+    for truncate in (False, True):
+        code, body = tiny_serve(request(2, instructions="which team " * 40), truncate=truncate)
+        assert code == 422 and body["detail"].startswith("branch too long") and "KEV_TRUNCATE_STATES" not in body["detail"]
+
+
+def test_serve_models_card_reports_the_state_limit(tiny_model, monkeypatch):
+    from fastapi.testclient import TestClient
+    from kev import serve
+    tok, model = tiny_model
+    s = serve.Server(SimpleNamespace(release_date=lambda: "2026-01-01", requested="tiny", meta=SimpleNamespace(base="tiny", lora=0)), tok, model, "cpu")
+    try:
+        monkeypatch.setattr(serve, "server", lambda: s)
+        with TestClient(serve.app) as client:
+            card = client.get("/v1/models").json()["models"][0]
+        assert card["max_state_tokens"] == 65536 and card["truncate_states"] is False
+    finally:
+        s.close()
+
+
+def test_benchmark_refuses_over_length_records(tiny_model, tmp_path):
+    """kev.benchmark never truncates: LocalPredictor encodes strictly within its suite's context, so an over-length state
+    raises ContextOverflow; evaluate_records aborts on it (failure.json) or, for data scored as published (skip_overlong),
+    counts it rejected."""
+    from kev.benchmark import evaluate_records
+    from kev.model import ContextOverflow
+    from kev.predictors import LocalPredictor
+    tok, model = tiny_model
+    p = LocalPredictor.__new__(LocalPredictor)
+    p.tok, p.model, p.device, p.temperature = tok, model, "cpu", 1.0
+    p.context = {"max_state": LIMIT, "max_branch": ROW, "max_packed": 2 * ROW}
+    rec = lambda i, words: {**request(words), "questions": {"team": {**request(words)["questions"]["team"], "label": "billing", "src": "s"}}, "_meta": {"id": f"r{i}", "group_id": f"r{i}", "source": "s", "variant": "clean"}}
+    assert p(rec(0, LIMIT - 1))["input_tokens"] > LIMIT
+    with pytest.raises(ContextOverflow, match=f"state exceeds {LIMIT} tokens: {LIMIT + 1}"):
+        p(rec(1, LIMIT))
+    with pytest.raises(ContextOverflow):
+        evaluate_records([rec(0, LIMIT - 1), rec(1, LIMIT)], p, tmp_path / "strict")
+    report, _ = evaluate_records([rec(0, LIMIT - 1), rec(1, LIMIT), rec(2, 3)], p, tmp_path / "published", skip_overlong=True)
+    assert report["coverage"]["rejected_records"] == 1 and report["coverage"]["evaluated_records"] == 2 and report["coverage"]["truncated_records"] == 0
 
 
 def test_option_isolation_mask_rule():
