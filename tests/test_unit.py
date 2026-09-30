@@ -979,25 +979,36 @@ def test_benchmark_report_records_the_kernel_environment(tiny_base, tmp_path, mo
     """report.json names the kernel set its logits depend on (runs/drift-v1/REPORT.md: a kernel added to the Modal image
     moved Kev-27B v1's reads with no kev change): package versions, device, GPU, backbone dtype and the Gated DeltaNet
     convolution and delta rule transformers bound. A kernel patched into the module (the exact-kernel parity tests do
-    that) is what gets named."""
-    import inspect, json, sys
+    that) or a rewritten layer forward (kev.fused_qwen35) is what gets named."""
+    import inspect, json, os, sys, types
+    from transformers.integrations import use_kernel_func_from_hub_with_fallback
     from transformers.models.qwen3_5 import modeling_qwen3_5 as Q
     from kev import benchmark, predictors as P
     train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "1", monkeypatch=monkeypatch)
     monkeypatch.setenv("KEV_DTYPE", "fp32")
     monkeypatch.setattr(sys, "argv", ["kev.benchmark", "--run", str(tmp_path / "full"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--out", str(tmp_path / "read")])
+    models, measure = [], P.kernel_environment
+    monkeypatch.setattr(P, "kernel_environment", lambda model, device: models.append(model) or measure(model, device))
     benchmark.main()
     env = json.loads((tmp_path / "read/report.json").read_text(encoding="utf-8"))["environment"]
     assert env["device"] == "cpu" and env["gpu"] is None and env["backend"] == "torch" and env["dtype"] == "float32"
+    assert env["attention"] == models[0].lm.config._attn_implementation and env["triton_f32_default"] == os.environ.get("TRITON_F32_DEFAULT")
     assert env["packages"]["torch"] == torch.__version__ and set(env["packages"]) == set(P.KERNEL_PACKAGES)
-    assert set(env["deltanet"]) == {"causal_conv1d_fn", "torch_chunk_gated_delta_rule"}
-    assert env["deltanet"]["torch_chunk_gated_delta_rule"] == P.bound_implementation(Q.torch_chunk_gated_delta_rule)
-    reference = inspect.unwrap(Q.causal_conv1d_fn)   # transformers' PyTorch convolution, as tests/test_model.py::_exact_kernels patches it in
-    monkeypatch.setattr(Q, "causal_conv1d_fn", reference)
-    assert P.bound_implementation(Q.causal_conv1d_fn) == f"{Q.__name__}.causal_conv1d_fn"
-    predictor = P.LocalPredictor(str(tmp_path / "full"), "cpu", benchmark.LoadOptions.from_env())
-    assert predictor.environment["deltanet"]["causal_conv1d_fn"] == f"{Q.__name__}.causal_conv1d_fn"
-    assert P.bound_implementation(lambda: None).endswith("<lambda>")
+    assert env["deltanet"] == {"forward": f"{Q.__name__}.Qwen3_5GatedDeltaNet.forward",
+                               **{name: P.bound_implementation(getattr(Q, name)) for name in P.DELTANET_KERNELS}}
+    # a package kernel transformers bound is what gets named (json.dumps standing in for fla / causal-conv1d)
+    assert P.bound_implementation(use_kernel_func_from_hub_with_fallback("dumps", "json")(lambda obj: None)) == "json.dumps"
+    # a reference patched into the module (tests/test_model.py::_exact_kernels) and a rewritten forward (kev.fused_qwen35)
+    monkeypatch.setattr(Q, "causal_conv1d_fn", inspect.unwrap(Q.causal_conv1d_fn))
+    def deltanet_forward(self, *a, **k): pass
+    layer = next(m for m in models[0].lm.modules() if isinstance(m, Q.Qwen3_5GatedDeltaNet))
+    layer.forward = types.MethodType(deltanet_forward, layer)
+    env = P.kernel_environment(models[0], "cpu")
+    assert env["deltanet"]["causal_conv1d_fn"] == f"{Q.__name__}.causal_conv1d_fn"
+    assert env["deltanet"]["forward"].endswith("test_benchmark_report_records_the_kernel_environment.<locals>.deltanet_forward")
+    # the MLX backend: its dtype, no torch module walk
+    mlx = types.SimpleNamespace(backend="mlx", dtype="bfloat16", hybrid=True)
+    assert {k: P.kernel_environment(mlx, "mlx")[k] for k in ("backend", "dtype", "attention", "deltanet")} == {"backend": "mlx", "dtype": "bfloat16", "attention": None, "deltanet": None}
 
 
 def test_local_predictor_long_rows_on_mlx_use_its_forward(monkeypatch):
