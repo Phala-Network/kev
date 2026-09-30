@@ -24,7 +24,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kev.checkpoint import Checkpoint, LoadOptions  # noqa: E402
 from kev.data import materialize  # noqa: E402
-from kev.suite import load_split, write_json  # noqa: E402
+from kev.suite import load_split, read_json, write_json  # noqa: E402
 
 GB = 1e9
 
@@ -70,7 +70,7 @@ def phase(name, run, suite, n, out):
     if name != "torch-full":
         import mlx.core as mx
         stats["mlx_peak_gb"] = mx.get_peak_memory() / GB
-    Path(out).write_text(json.dumps({"probs": probs, "stats": stats}), encoding="utf-8")
+    write_json(Path(out), {"probs": probs, "stats": stats})
 
 
 def compare(got, ref):
@@ -104,7 +104,7 @@ def main():
             to = Path(tmp) / f"{name}.json"
             print(f"{name}: {run}", flush=True)
             subprocess.run([sys.executable, __file__, "--phase", name, "--run", str(run), "--suite", a.suite, "--n", str(a.n), "--to", str(to), "--full", a.full], check=True)
-            results[name] = json.loads(to.read_text(encoding="utf-8"))
+            results[name] = read_json(to)
             print(json.dumps(results[name]["stats"]), flush=True)
     report["loads"] = {k: v["stats"] for k, v in results.items()}
     pairs = [("mlx-full", "mlx-lora"), ("mlx-full", "mlx-lora-bf16"), ("mlx-full", "torch-full"), ("mlx-lora", "torch-full")]
