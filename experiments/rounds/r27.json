@@ -2,7 +2,7 @@
   "round": 27,
   "registered": "PLAN.md \"Round 27 (registered)\"",
   "gpu": "H100",
-  "app": "kev",
+  "app": "kev-r27",
   "reads": {
     "hard": {
       "suite": "evals/hard-v1"

@@ -524,3 +524,23 @@ runs/r26-27b-lr1e6/00-trial-0/snapshots/*/checkpoint/*
 !runs/kev-deploy-27b-v2/deploy_check.json
 !runs/kev-deploy-27b-v2/make_long_state.py
 !runs/kev-deploy-27b-v2/semif-v1/rows.json
+# round 27 (experiments/rounds/r27.json): the read-out, verdicts and launch records; round 18's development reads and the
+# parent's reads it names (rows + report), the new transfer-r3 calibration reads, the confirmation reads (runs/r27c-*: rows
+# + report, no document text) and the locked read; the release numbers and the staged-checkpoint check.
+!runs/r27-readout/
+!runs/r27-verdict/
+!runs/r27-reads-*.json
+!runs/r27-9b-*/
+runs/r27-9b-*/predictions.jsonl
+!runs/r27c-9b-*/
+runs/r27c-9b-*/predictions.jsonl
+!runs/r18-9b-joint-*/
+runs/r18-9b-joint-*/predictions.jsonl
+!runs/hv1-P9/
+!runs/dt1-P9/
+!runs/docs1-P9/
+runs/hv1-P9/predictions.jsonl
+runs/dt1-P9/predictions.jsonl
+runs/docs1-P9/predictions.jsonl
+!runs/rel9-staged-semif/
+runs/rel9-staged-semif/predictions.jsonl
