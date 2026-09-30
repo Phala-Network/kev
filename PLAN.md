@@ -2620,7 +2620,7 @@ family reads of `jaredpalmer/kev-9b@2629c06a` (`runs/r27c-9b-parent-*`). Infrast
   (max |Δp| 0.0014 and 0.0015; not bit-exact against reads made in-trial on another GPU); `@v1` loads v1 at T 2.30 and
   reproduces its served semif-v1 read (max |Δp| 0.0008, 0 flips).
 - Numbers: `experiments/releases/kev-9b-r27.json` → `runs/release/kev-9b-r27.json`; README Models row, calibration and
-  limits text, figures (`scripts/plot_family.py`, `scripts/plot_tweet.py`), AGENTS.md, claims (923 verified). GitHub release
+  limits text, figures (`scripts/plot_family.py`, `scripts/plot_tweet.py`), AGENTS.md, claims (901 verified). GitHub release
   `kev-family`: `kev-9b.tar.gz` rebuilt from the Hub commit (+ `locked_test.json`), `SHA256SUMS.txt` regenerated.
 - The kev-deploy / kev-finetune `KEV_REF` pins are unchanged: v2 is an adapter of the same shape, served by the same code.
 
