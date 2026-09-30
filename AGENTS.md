@@ -80,12 +80,14 @@ Title Case sections, API tables, Authors + License); model cards are formal.
   --suite evals/v4/transfer-v4 --out runs/<name>`; `--remote <url>` scores any System One endpoint (`--remote-concurrency N` keeps N requests in flight; rows are identical), `--data x.jsonl` your
   own labelled rows, `--date_facts` the opt-in preprocessing, `--allow-test` is the only way to read a locked test.
   Writes `rows.json` (per question, with logits) + `report.json` (accuracy, ECE/Brier/NLL, selective coverage and AURC,
-  permutation, isolation). `kev.calibrate --rows <rows.json>` reports what one temperature fitted on those rows would do (raw / shipped / workload in-sample / workload group-disjoint OOF, paired bootstrap vs shipped; report only, writes `calibration.json` next to the rows); external-suite `rows.json` are committed for this. `kev.evaluate` is the legacy prototype eval (`runs/kev`, `eval.json`) and is not used for
+  permutation, isolation; `environment`: the kernel set the logits depend on, from `kev.predictors.kernel_environment`: package versions, GPU, backbone dtype, attention implementation, the DeltaNet layer forward (kev.fused_qwen35 replaces it) and the conv and delta rule transformers bound; compare it before pairing two reads bit for bit). `kev.calibrate --rows <rows.json>` reports what one temperature fitted on those rows would do (raw / shipped / workload in-sample / workload group-disjoint OOF, paired bootstrap vs shipped; report only, writes `calibration.json` next to the rows); external-suite `rows.json` are committed for this. `kev.evaluate` is the legacy prototype eval (`runs/kev`, `eval.json`) and is not used for
   releases. `kev.compare --candidate <dir> --reference <dir>` pairs two result dirs (record-clustered bootstrap).
   `kev.jev --suite ... --out ...` scores Jev through Vercel AI Gateway (AI SDK `experimental_evaluate`, node worker in
   `playground/scripts/jev-evaluate.mjs`; needs `AI_GATEWAY_API_KEY` or `--provision-scope`; budget-capped).
 - Studies: `kev.experiment --plan experiments/*.json --suite <suite> --out runs/<study>` runs config-only trials
-  (allowlist + ranges in `experiment.py: DEFAULTS/CHOICES/validated_trial`, provenance, coverage/isolation gates,
+  (allowlist + ranges in `experiment.py: DEFAULTS/CHOICES/validated_trial`, provenance (`provenance.json`, copied into
+  `result.json`; its `environment` is the kernel set the trial's reads were scored on, report.json's block from the same
+  `kev.predictors.kernel_environment`, taken from the loaded predictor and replaced when a resume re-scores; trials before it have none), coverage/isolation gates,
   `results.jsonl` ledger, `--transfer <suite>` for an OOD read per trial, `--aggregate` to rank an existing directory,
   `--resume` for interrupted trials (evaluation; unfinished full-weight trials continue training from their resume point),
   `--wait-pid` to queue behind a training job). A full-weight trial runs under torchrun on every GPU of its container,
@@ -244,8 +246,8 @@ Title Case sections, API tables, Authors + License); model cards are formal.
   `kev.experiment --aggregate`). `KEV_GPU` picks the GPU type (H100 default; T4 for the free tier), `KEV_APP_NAME`
   isolates a research deployment, `worker_environment` propagates app/GPU/secret settings (a dependency list that
   differs inside the container fails with "Function has N dependencies but container got M"). Legacy checkpoints: Hub id,
-  or `modal volume put kev-runs runs/<run> /legacy/<run>` then `--existing /runs/legacy/<run>`. Eval on CUDA is
-  fp32-exact (TF32 + fused SDPA off in `LocalPredictor`); training keeps TF32 and may use `--dtype bf16`. Probes,
+  or `modal volume put kev-runs runs/<run> /legacy/<run>` then `--existing /runs/legacy/<run>`. Eval on CUDA turns
+  TF32 and fused SDPA off in `LocalPredictor` (what "fp32-exact" means and does not, below); training keeps TF32 and may use `--dtype bf16`. Probes,
   external benches and new-base fit checks lived in `modal_probe35.py` until 2026-09-21 (folded in at 90990a5); the
   how-to is the `kev-modal-study` skill.
 - Figures: `uv run python scripts/plot_family.py` and `uv run python scripts/plot_tweet.py` regenerate docs/kev-family.png and docs/kev-benchmark{,-dark}.png from
@@ -297,6 +299,13 @@ Title Case sections, API tables, Authors + License); model cards are formal.
   the playground proxies :8009)
   - TypeSafe-compatible: `POST /v1/systemone`, `GET /v1/models` (model cards for `kev-latest` and `jev-latest`, plus device, dtype, temperature and prefix-cache stats), an `x-typesafe-request-id` header on every response, and bearer auth when `KEV_API_KEY` is set (unset = open server).
   - SDK: `TypeSafeClient(api_key="local", base_url="http://127.0.0.1:8009", model="kev-latest")`
+  - Admission (`kev.model.admit`, the one check kev.serve and the Space call, the same on torch and MLX): a state over `SERVE_MAX_STATE` tokens (65,536, `<state>` included) gets a 422
+    naming its count, the limit and the fixes (the TypeSafe SDK raises `TypeSafeUnprocessableEntityError` with it, not retried), like a question row over `SERVE_MAX_BRANCH`;
+    until this was fixed the server cut the state silently (only `usage.input_tokens` showed it; every Kev-27B deployment at kev-deploy's f2bb629 pin read 8,192 tokens).
+    `KEV_TRUNCATE_STATES=1` (`Server.truncate_states`) reads the first 65,536 tokens instead, and every response of such a server carries `truncated` plus
+    `usage.state_tokens` / `state_tokens_used` (the SDK ignores the extra fields); a default server's body is unchanged. `/v1/models` reports `max_state_tokens` and
+    `truncate_states`. No per-request switch: TypeSafe's own endpoint would ignore it. Benchmarks never truncate (`LocalPredictor` encodes strictly within the suite's context);
+    `--remote` turns an endpoint's 400/413/422 into `ContextOverflow` at once (rejected under `skip_overlong`, else a clean stop), retries only 408/429/5xx and connection errors.
   - CUDA: bf16, fused kernels and CUDA graphs by default (`LoadOptions.fused` / `LoadOptions.cuda_graphs`, `KEV_FUSED=0` / `KEV_CUDA_GRAPHS=0` to decline; fused only when fla 0.5.2 is installed, `checkpoint.fused_available`, not in the serve extra). A server pass was
     kernel-launch bound (~60 ms on an H100 at any length). `kev/fused_qwen35.py` rewrites the merged Qwen3.5 layers with fla Triton kernels
     (it needs fla 0.5.2 exactly, pinned in the images, and refuses others: it patches fla's NB-keyed kernel launches; a pass continuing a
@@ -402,7 +411,20 @@ runs / the endpoint / the volumes. Tests: `tests/test_skill_scripts.py`.
   `--weights_dtype bf16` always load bf16 with the adapter unmerged. Any change here must keep the parity
   tests in tests/test_model.py (merged vs unmerged, prefix vs full pass, bucket padding) and tests/test_mlx.py (MLX vs fp32 torch, prefix form vs row form, isolation; Apple Silicon only) passing; report numbers with the fp32 unmerged path.
   `scripts/mlx_parity.py --run <ckpt>` is the fuller read (60 records, latency of every path); MLX's fp32 GPU matmul is a reduced-precision fast path (~1e-3 relative on an M5), which is why the LoRA merge runs on `mx.cpu`.
-- Serving context is 65,536 tokens for the state and 73,728 for the state plus one question branch, so a question gets at least 8,192 (`kev.model.SERVE_MAX_*`; 8,192 / 8,192 until the long-context PR, `kev.suite.SERVING_CONTEXT_8K`, which the suites frozen before it record and their builders keep); `kev.train --max_state` goes up to the same 65,536 (`MAX_TRAIN_STATE`). The released checkpoints trained on 384 / 1,024, so longer inputs are untested for accuracy. No limit on questions per request: the row form runs `rows_per_pass` rows per forward pass (`ROW_PASS_TOKENS`, a 16,384-token budget counting the cached state per row), and an attention-only model switches from the packed mask to rows above it (`DecisionModel.rows_form`). Evaluation is fp32-exact except long rows: on CUDA with the torch backend, a record whose longest row exceeds `ROW_PASS_TOKENS` runs under SDPA's flash / memory-efficient kernels (the exact math kernel's L x L scores do not fit) and is labelled: `"kernels": "efficient"` on its prediction and rows, `long_rows: {count, records, kernels, threshold}` in report.json (both absent when no row is long, so other reads are unchanged; `LocalPredictor`). This is CUDA-only: on CPU / MPS attention stays eager and exact and still materialises L x L. A long record on a hybrid torch backbone runs its state once through the shared prefix; the MLX backend's `forward` already does. Kev-4B on MLX, 64 questions on a 4.8k-token state: 4.3 s / 9.4 GB peak instead of 18.5 s / 24.7 GB in one pass. `n_perm` on `/permute` is 1..64.
+- Serving context is 65,536 tokens for the state and 73,728 for the state plus one question branch, so a question gets at least 8,192 (`kev.model.SERVE_MAX_*`; 8,192 / 8,192 until the long-context PR, `kev.suite.SERVING_CONTEXT_8K`, which the suites frozen before it record and their builders keep); `kev.train --max_state` goes up to the same 65,536 (`MAX_TRAIN_STATE`). The released checkpoints trained on 384 / 1,024, so longer inputs are untested for accuracy. No limit on questions per request: the row form runs `rows_per_pass` rows per forward pass (`ROW_PASS_TOKENS`, a 16,384-token budget counting the cached state per row), and an attention-only model switches from the packed mask to rows above it (`DecisionModel.rows_form`). Evaluation is fp32-exact (as the next item defines it) except long rows: on CUDA with the torch backend, a record whose longest row exceeds `ROW_PASS_TOKENS` runs under SDPA's flash / memory-efficient kernels (the exact math kernel's L x L scores do not fit) and is labelled: `"kernels": "efficient"` on its prediction and rows, `long_rows: {count, records, kernels, threshold}` in report.json (both absent when no row is long, so other reads are unchanged; `LocalPredictor`). This is CUDA-only: on CPU / MPS attention stays eager and exact and still materialises L x L. A long record on a hybrid torch backbone runs its state once through the shared prefix; the MLX backend's `forward` already does. Kev-4B on MLX, 64 questions on a 4.8k-token state: 4.3 s / 9.4 GB peak instead of 18.5 s / 24.7 GB in one pass. `n_perm` on `/permute` is 1..64.
+- What "fp32-exact" guarantees (`runs/drift-v1/REPORT.md`). A read is bit-reproducible for a fixed kernel set: the same kev
+  code, image (torch, transformers, flash-linear-attention, Triton, causal-conv1d) and GPU type give bit-identical logits
+  run to run and container to container, and a kev change that leaves the scoring path alone keeps them (the 2026-09-23
+  code and `main` agree bit for bit on Kev-27B v1). A kernel change moves them. `LocalPredictor`'s switches reach only
+  PyTorch. On CUDA, flash-linear-attention's Triton kernels run the Gated DeltaNet rule of every Qwen3.5 / Qwen3.8 backbone
+  with TF32 dot products, so an fp32 Qwen3.5 read sits ≈ 0.003 in p from true fp32 (Kev-4B, semif-v1: 1 flip in 252;
+  `TRITON_F32_DEFAULT=ieee` closes it to 4e-6). A bf16 backbone (Kev-27B) is bf16 in every kernel. In both cases an
+  upstream bit change is amplified. #125 put causal-conv1d's CUDA kernel in the Modal image, replacing transformers'
+  PyTorch convolution. That alone moved Kev-27B v1 by max |Δp| 0.03-0.06 (0-0.4 % flips, ECE +0.0008 on breadth-v1) and
+  Kev-4B by 6e-4, so reads from before and after #125 differ by that much. CPU / MPS reads run no Triton or causal-conv1d
+  and differ from CUDA reads by the same terms. Pair reads from the same kernel set. When a parent read is older than an
+  image change, re-read the parent; a deployed app keeps the image of its last deploy. `runs/drift-v1/probe_app.py` swaps
+  the convolution and the delta rule in place to measure one change.
 
 ## Calibration Research
 

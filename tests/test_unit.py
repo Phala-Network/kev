@@ -294,7 +294,7 @@ def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
             if self.fail == "other": raise ValueError("not memory")
             return [[torch.tensor([0.5, 0.5])] for _ in encs], [("prefix", self.calls) if k else None for k in keep]
 
-    enc = lambda state: {"ids": list(state) + [9], "seg": [0] * len(state) + [1]}
+    enc = lambda state: {"ids": list(state) + [9], "seg": [0] * len(state) + [1], "state_tokens": len(state)}
     model = Model()
     s = Server(SimpleNamespace(release_date=lambda: "2026-01-01"), None, model, "cpu")
     try:
@@ -382,6 +382,187 @@ def test_bearer_auth_and_request_id(monkeypatch):
         assert client.get("/v1/models").status_code == 401
         assert client.get("/v1/models", headers={"authorization": "Bearer wrong"}).status_code == 401
         assert client.get("/openapi.json").status_code == 200   # only /v1 is gated
+
+
+# --- serving admission (kev.model.admit through kev.serve.Server.submit): refuse an over-length state, never cut it silently
+
+@pytest.fixture(scope="module")
+def tiny_model(tiny_base):
+    """The tiny hybrid base as a DecisionModel (random pointer head) and its tokenizer, on CPU in fp32."""
+    from transformers import AutoTokenizer
+    tok = AutoTokenizer.from_pretrained(tiny_base / "base")
+    torch.manual_seed(0)
+    return tok, DecisionModel(str(tiny_base / "base"), tok, "cpu").eval()
+
+
+LIMIT, ROW = 8, 64   # the serving limits in these tests: <state> + 7 words ("it" is one token of the tiny vocabulary), and a 64-token row
+
+
+@pytest.fixture
+def tiny_serve(tiny_model, monkeypatch):
+    """-> post(body, truncate=False) -> (status, json) against /v1/systemone on the tiny model, with the serving limits
+    shrunk to LIMIT state tokens and a ROW-token row (state + one question), and the Server behind each call."""
+    from fastapi.testclient import TestClient
+    import kev.model as M
+    from kev import serve
+    tok, model = tiny_model
+    monkeypatch.setattr(M, "SERVE_MAX_STATE", LIMIT); monkeypatch.setattr(M, "SERVE_MAX_BRANCH", ROW); monkeypatch.setattr(serve, "SERVE_MAX_STATE", LIMIT)
+    servers = {}
+
+    def post(body, truncate=False, path="/v1/systemone"):
+        if truncate not in servers: servers[truncate] = serve.Server(SimpleNamespace(release_date=lambda: "2026-01-01"), tok, model, "cpu", truncate_states=truncate)
+        monkeypatch.setattr(serve, "server", lambda: servers[truncate])
+        with TestClient(serve.app) as client:
+            r = client.post(path, json=body)
+        return r.status_code, r.json()
+    yield post
+    for s in servers.values(): s.close()
+
+
+def request(words, instructions="which team"):
+    return {"state": " ".join(["it"] * words), "model": "kev-latest",
+            "questions": {"team": {"type": "choice", "instructions": instructions, "criteria": {"billing": None, "shipping": None, "refund": None}}}}
+
+
+def test_serve_refuses_an_over_length_state(tiny_serve):
+    """The default: a state one token over the limit is a 422 that says how long it is, the limit, and how to fix it
+    (the TypeSafe SDKs raise it as TypeSafeUnprocessableEntityError with this text: tests/test_api.py)."""
+    code, body = tiny_serve(request(LIMIT))            # <state> + LIMIT words = LIMIT + 1 tokens
+    assert code == 422
+    assert body["detail"].startswith(f"state is {LIMIT + 1} tokens, over the {LIMIT}-token limit (the <state> token included)")
+    assert "split it across requests" in body["detail"] and "KEV_TRUNCATE_STATES=1" in body["detail"]
+
+
+def test_serve_admits_a_state_exactly_at_the_limit(tiny_serve):
+    """LIMIT tokens with <state> is admitted and read whole; a server that cannot truncate keeps the TypeSafe body as it was."""
+    code, body = tiny_serve(request(LIMIT - 1))
+    assert code == 200 and set(body) == {"model", "answers", "usage", "latency_ms"} and set(body["usage"]) == {"input_tokens", "output_tokens"}
+    code, opted = tiny_serve(request(LIMIT - 1), truncate=True)
+    assert code == 200 and opted["truncated"] is False and (opted["usage"]["state_tokens"], opted["usage"]["state_tokens_used"]) == (LIMIT, LIMIT)
+    assert opted["answers"] == body["answers"] and opted["usage"]["input_tokens"] == body["usage"]["input_tokens"]
+
+
+def test_serve_truncates_only_when_opted_in_and_says_so(tiny_serve):
+    """KEV_TRUNCATE_STATES=1 (Server.truncate_states): the over-length state is read to its first LIMIT tokens, the answers
+    are those of the cut state, and the response carries truncated: true with both counts; /separate reports it too."""
+    code, body = tiny_serve(request(LIMIT + 5), truncate=True)
+    assert code == 200 and body["truncated"] is True
+    assert (body["usage"]["state_tokens"], body["usage"]["state_tokens_used"]) == (LIMIT + 6, LIMIT)
+    code, cut = tiny_serve(request(LIMIT - 1), truncate=True)   # the same state cut by hand to LIMIT tokens
+    assert body["answers"] == cut["answers"] and body["usage"]["input_tokens"] == cut["usage"]["input_tokens"]
+    code, sep = tiny_serve(request(LIMIT + 5), truncate=True, path="/v1/systemone/separate")
+    assert code == 200 and sep["truncated"] is True and (sep["usage"]["state_tokens"], sep["usage"]["state_tokens_used"]) == (LIMIT + 6, LIMIT)
+    permute = lambda words, truncate: tiny_serve({"request": request(words), "question": "team", "n_perm": 2}, truncate=truncate, path="/v1/systemone/permute")
+    code, perm = permute(LIMIT + 5, True)
+    assert code == 200 and perm["truncated"] is True and perm["usage"] == {"state_tokens": LIMIT + 6, "state_tokens_used": LIMIT}
+    code, perm = permute(LIMIT - 1, False)
+    assert code == 200 and set(perm) == {"runs", "argmax_stable", "spread"}   # a default server's /permute body is unchanged
+    assert permute(LIMIT, False)[0] == 422
+
+
+def test_serve_refuses_a_long_question_either_way(tiny_serve):
+    """A question row (state + branch) over SERVE_MAX_BRANCH stays a 422 with or without truncation, and its message does
+    not offer KEV_TRUNCATE_STATES (cutting the state is not what it needs)."""
+    for truncate in (False, True):
+        code, body = tiny_serve(request(2, instructions="which team " * 40), truncate=truncate)
+        assert code == 422 and body["detail"].startswith("branch too long") and "KEV_TRUNCATE_STATES" not in body["detail"]
+
+
+def test_serve_models_card_reports_the_state_limit(tiny_model, monkeypatch):
+    from fastapi.testclient import TestClient
+    from kev import serve
+    tok, model = tiny_model
+    s = serve.Server(SimpleNamespace(release_date=lambda: "2026-01-01", requested="tiny", meta=SimpleNamespace(base="tiny", lora=0)), tok, model, "cpu")
+    try:
+        monkeypatch.setattr(serve, "server", lambda: s)
+        with TestClient(serve.app) as client:
+            card = client.get("/v1/models").json()["models"][0]
+        assert card["max_state_tokens"] == 65536 and card["truncate_states"] is False
+    finally:
+        s.close()
+
+
+def test_benchmark_refuses_over_length_records(tiny_model, tmp_path):
+    """kev.benchmark never truncates: LocalPredictor encodes strictly within its suite's context, so an over-length state
+    raises ContextOverflow; evaluate_records aborts on it (failure.json) or, for data scored as published (skip_overlong),
+    counts it rejected."""
+    from kev.benchmark import evaluate_records
+    from kev.model import ContextOverflow
+    from kev.predictors import LocalPredictor
+    tok, model = tiny_model
+    p = LocalPredictor.__new__(LocalPredictor)
+    p.tok, p.model, p.device, p.temperature = tok, model, "cpu", 1.0
+    p.context = {"max_state": LIMIT, "max_branch": ROW, "max_packed": 2 * ROW}
+    rec = lambda i, words: {**request(words), "questions": {"team": {**request(words)["questions"]["team"], "label": "billing", "src": "s"}}, "_meta": {"id": f"r{i}", "group_id": f"r{i}", "source": "s", "variant": "clean"}}
+    assert p(rec(0, LIMIT - 1))["input_tokens"] > LIMIT
+    with pytest.raises(ContextOverflow, match=f"state exceeds {LIMIT} tokens: {LIMIT + 1}"):
+        p(rec(1, LIMIT))
+    with pytest.raises(ContextOverflow):
+        evaluate_records([rec(0, LIMIT - 1), rec(1, LIMIT)], p, tmp_path / "strict")
+    report, _ = evaluate_records([rec(0, LIMIT - 1), rec(1, LIMIT), rec(2, 3)], p, tmp_path / "published", skip_overlong=True)
+    assert report["coverage"]["rejected_records"] == 1 and report["coverage"]["evaluated_records"] == 2 and report["coverage"]["truncated_records"] == 0
+
+
+@pytest.fixture
+def fake_endpoint():
+    """A local HTTP server standing in for a System One endpoint: -> (base_url, script) where script(state) is a list
+    of (status, body) answers for requests with that state, served in order (the last one repeats), and every request is
+    logged in script.calls."""
+    import http.server, json, threading
+    answers, calls = {}, []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            state = json.loads(self.rfile.read(int(self.headers["content-length"])))["state"]
+            calls.append(state)
+            queue = answers[state]; status, body = queue.pop(0) if len(queue) > 1 else queue[0]
+            data = json.dumps(body).encode()
+            self.send_response(status); self.send_header("content-type", "application/json"); self.send_header("content-length", str(len(data))); self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args): pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    script = lambda state, *replies: answers.__setitem__(state, list(replies))
+    script.calls = calls
+    yield f"http://127.0.0.1:{httpd.server_address[1]}", script
+    httpd.shutdown()
+
+
+def test_remote_predictor_counts_a_refusal_and_retries_only_transient_errors(fake_endpoint, tmp_path, monkeypatch):
+    """kev.benchmark --remote: an endpoint's 422 (kev.serve past its context; 400 / 413 likewise) raises ContextOverflow on
+    the first answer, so evaluate_records counts the record rejected under skip_overlong and stops cleanly otherwise
+    (failure.json names it). A 503 is retried and then answered; a 401 stops at once without retries."""
+    import json
+    from kev import predictors
+    from kev.benchmark import evaluate_records
+    from kev.model import ContextOverflow
+    monkeypatch.setattr(predictors.time, "sleep", lambda s: None)
+    url, script = fake_endpoint
+    ok = {"model": "kev-latest", "answers": {"team": {"type": "choice", "choice": "billing", "confidence": 0.5, "probabilities": {"billing": 0.7, "shipping": 0.2, "refund": 0.1}}},
+          "usage": {"input_tokens": 12, "output_tokens": 30}}
+    refused = {"detail": "state is 70,002 tokens, over the 65,536-token limit (the <state> token included): shorten the document or split it across requests"}
+    rec = lambda state: {**request(1), "state": state, "questions": {"team": {**request(1)["questions"]["team"], "label": "billing", "src": "s"}},
+                         "_meta": {"id": state, "group_id": state, "source": "s", "variant": "clean"}}
+    script("short", (200, ok)); script("long", (422, refused)); script("flaky", (503, {"detail": "busy"}), (503, {"detail": "busy"}), (200, ok)); script("key", (401, {"detail": "bad key"}))
+    p = predictors.RemotePredictor(url, retries=3)
+    with pytest.raises(ContextOverflow, match="HTTP 422.*70,002 tokens"):
+        p(rec("long"))
+    assert script.calls.count("long") == 1                                    # not retried
+    report, _ = evaluate_records([rec("short"), rec("long"), rec("flaky")], p, tmp_path / "published", skip_overlong=True)
+    assert (report["coverage"]["evaluated_records"], report["coverage"]["rejected_records"]) == (2, 1) and script.calls.count("flaky") == 3
+    assert json.loads((tmp_path / "published" / "rejected.json").read_text(encoding="utf-8"))[0]["id"] == "long"
+    with pytest.raises(ContextOverflow):
+        evaluate_records([rec("short"), rec("long")], p, tmp_path / "admitted")
+    assert json.loads((tmp_path / "admitted" / "failure.json").read_text(encoding="utf-8"))["error_type"] == "ContextOverflow"
+    with pytest.raises(RuntimeError, match="HTTP 401: bad key"):
+        p(rec("key"))
+    assert script.calls.count("key") == 1
+    script("down", (503, {"detail": "busy"}))
+    with pytest.raises(RuntimeError, match="failed after 3 attempts"):
+        p(rec("down"))
+    assert script.calls.count("down") == 3
 
 
 def test_option_isolation_mask_rule():
@@ -973,6 +1154,82 @@ def test_local_predictor_scores_long_rows_through_the_shared_prefix(tiny_base, t
     assert shared == [True, True] and [r["kernels"] for r in scored] == [P.LONG_ROW_KERNELS] * 2
     assert report["long_rows"] == {"count": 2, "records": 1, "kernels": [P.LONG_ROW_KERNELS], "threshold": ROW_PASS_TOKENS}
     assert [x for r in scored for x in r["logits"]] == pytest.approx([x for z in rows["logits"].values() for x in z.values()], abs=1e-5)
+
+
+def test_benchmark_report_records_the_kernel_environment(tiny_base, tmp_path, monkeypatch):
+    """report.json names the kernel set its logits depend on (runs/drift-v1/REPORT.md: a kernel added to the Modal image
+    moved Kev-27B v1's reads with no kev change): package versions, device, GPU, backbone dtype and the Gated DeltaNet
+    convolution and delta rule transformers bound. A kernel patched into the module (the exact-kernel parity tests do
+    that) or a rewritten layer forward (kev.fused_qwen35) is what gets named."""
+    import inspect, json, os, sys, types
+    from transformers.integrations import use_kernel_func_from_hub_with_fallback
+    from transformers.models.qwen3_5 import modeling_qwen3_5 as Q
+    from kev import benchmark, predictors as P
+    train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "1", monkeypatch=monkeypatch)
+    monkeypatch.setenv("KEV_DTYPE", "fp32")
+    monkeypatch.setattr(sys, "argv", ["kev.benchmark", "--run", str(tmp_path / "full"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--out", str(tmp_path / "read")])
+    models, measure = [], P.kernel_environment
+    monkeypatch.setattr(P, "kernel_environment", lambda model, device: models.append(model) or measure(model, device))
+    benchmark.main()
+    env = json.loads((tmp_path / "read/report.json").read_text(encoding="utf-8"))["environment"]
+    assert env["device"] == "cpu" and env["gpu"] is None and env["backend"] == "torch" and env["dtype"] == "float32"
+    assert env["attention"] == models[0].lm.config._attn_implementation and env["triton_f32_default"] == os.environ.get("TRITON_F32_DEFAULT")
+    assert env["packages"]["torch"] == torch.__version__ and set(env["packages"]) == set(P.KERNEL_PACKAGES)
+    assert env["deltanet"] == {"forward": f"{Q.__name__}.Qwen3_5GatedDeltaNet.forward",
+                               **{name: P.bound_implementation(getattr(Q, name)) for name in P.DELTANET_KERNELS}}
+    # a package kernel transformers bound is what gets named (json.dumps standing in for fla / causal-conv1d)
+    assert P.bound_implementation(use_kernel_func_from_hub_with_fallback("dumps", "json")(lambda obj: None)) == "json.dumps"
+    # a reference patched into the module (tests/test_model.py::_exact_kernels) and a rewritten forward (kev.fused_qwen35)
+    monkeypatch.setattr(Q, "causal_conv1d_fn", inspect.unwrap(Q.causal_conv1d_fn))
+    def deltanet_forward(self, *a, **k): pass
+    layer = next(m for m in models[0].lm.modules() if isinstance(m, Q.Qwen3_5GatedDeltaNet))
+    layer.forward = types.MethodType(deltanet_forward, layer)
+    env = P.kernel_environment(models[0], "cpu")
+    assert env["deltanet"]["causal_conv1d_fn"] == f"{Q.__name__}.causal_conv1d_fn"
+    assert env["deltanet"]["forward"].endswith("test_benchmark_report_records_the_kernel_environment.<locals>.deltanet_forward")
+    # the MLX backend: its dtype, no torch module walk
+    mlx = types.SimpleNamespace(backend="mlx", dtype="bfloat16", hybrid=True)
+    assert {k: P.kernel_environment(mlx, "mlx")[k] for k in ("backend", "dtype", "attention", "deltanet")} == {"backend": "mlx", "dtype": "bfloat16", "attention": None, "deltanet": None}
+
+
+def test_trial_provenance_records_the_kernel_environment(tiny_base, tmp_path, monkeypatch):
+    """A trial's reads (kev.experiment.score_trial: calibration, development, mechanism checks, transfer) name the kernel set
+    they were scored on, as kev.benchmark's report.json does: provenance.json and result.json's provenance carry
+    `environment`, the predictor's own (kev.predictors.kernel_environment, after load), next to the fields they always had.
+    Provenance written before the key existed still aggregates and still tells kev.rounds the trial's suite and training."""
+    import json, shutil
+    from kev import experiment as E, predictors as P, rounds
+    from kev.data import load_records
+    from kev.suite import digest, read_json, write_json
+    train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "1", monkeypatch=monkeypatch)
+    records = [{**r, "_meta": {"id": f"tiny-{i}", "group_id": f"tiny-{i}", "variant": "clean", "source": "tiny"},
+                "questions": {qid: {**q, "src": "tiny"} for qid, q in r["questions"].items()}} for i, r in enumerate(load_records(tiny_base / "data.jsonl")[:3])]
+    monkeypatch.setattr(E, "load_split", lambda suite, split: [] if split == "calibration" else records)   # a legacy trial may have no calibration partition
+    monkeypatch.setattr(E, "read_manifest", lambda suite: {})
+    predictors, real = [], E.LocalPredictor
+    monkeypatch.setattr(E, "LocalPredictor", lambda *a, **k: predictors.append(real(*a, **k)) or predictors[-1])
+    suite, study = E.ROOT / "evals/smoke-v1", tmp_path / "runs/s"
+    E.execute_trial({"base": "tiny"}, suite, study / "00-trial-0", E.source_hashes(), "cpu", existing=tmp_path / "full")
+    provenance = read_json(study / "00-trial-0/provenance.json")
+    [predictor] = predictors
+    assert provenance["environment"] == predictor.environment == read_json(study / "00-trial-0/result.json")["provenance"]["environment"]
+    env = provenance["environment"]
+    assert set(env) == set(P.kernel_environment(predictor.model, "cpu")) and env["device"] == "cpu" and env["gpu"] is None
+    assert env["dtype"] == predictor.model.dtype and env["deltanet"]["forward"].endswith("GatedDeltaNet.forward") and env["packages"]["torch"] == torch.__version__
+    assert {"config", "config_sha256", "suite_sha256", "source_hashes", "git_commit", "platform", "torch", "device", "gpu", "legacy_checkpoint", "measured_checkpoint"} < set(provenance)
+    assert (provenance["torch"], provenance["gpu"], provenance["suite_sha256"]) == (torch.__version__, None, digest(suite / "manifest.json"))
+    # a trial recorded before `environment` existed
+    shutil.copytree(study / "00-trial-0", study / "01-old")
+    for name, path in (("provenance.json", ()), ("result.json", ("provenance",))):
+        data = read_json(study / "01-old" / name); node = data
+        for key in path: node = node[key]
+        del node["environment"]; write_json(study / "01-old" / name, data)
+    E.aggregate(study)
+    ledger = [json.loads(line) for line in (study / "results.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [r["id"] for r in ledger] == ["00-trial-0", "01-old"] and ledger[0] == {**ledger[1], "id": "00-trial-0", "path": str(study / "00-trial-0")}
+    for trial in ("runs/s/00-trial-0", "runs/s/01-old"):
+        assert rounds.trial_suite({}, trial, root=tmp_path) == "evals/smoke-v1"
+        assert rounds.trial_training({}, trial, root=tmp_path) == rounds.recorded_training(digest(suite / "manifest.json"))
 
 
 def test_local_predictor_long_rows_on_mlx_use_its_forward(monkeypatch):
