@@ -228,6 +228,7 @@ class Checkpoint:
         """-> (tokenizer, model) in eval mode with the LoRA applied (or the full backbone loaded) and the pointer head loaded. The model is a
         DecisionModel (torch) or an MLXDecisionModel (backend mlx); both expose the same scoring interface."""
         meta = self.meta
+        if self.full and opts.lora_scale != 1: raise ValueError("lora_scale interpolates an adapter; a full-weight checkpoint has none")
         tok = load_tokenizer(meta.base, revision=meta.base_revision)
         m = self._load_mlx(tok, opts) if self.backend(device, opts) == "mlx" else self._load_torch(tok, device, opts)
         m.head.load_state_dict(meta.head); m.eval()
@@ -240,13 +241,13 @@ class Checkpoint:
         (kev.mlx_model.load_full; strict names/shapes/dtype), nothing merged. Refusals come before the mlx-lm import, which
         would otherwise hide them on a machine without it."""
         full = self.full
-        if full and opts.lora_scale != 1: raise ValueError("lora_scale interpolates an adapter; a full-weight checkpoint has none")
         if not full and not opts.merge: raise ValueError("the MLX backend always merges the adapter (KEV_MERGE=0 needs backend=torch)")
         if self.meta.option_isolation: raise ValueError("option_isolation needs the packed mask; not available on the MLX backend")
         if not self.hybrid_base(): raise ValueError(f"the MLX backend is for the hybrid (Qwen3.5) bases; {self.path if full else self.meta.base} is attention-only and runs on MPS with backend=torch")
+        dtype = self.saved_dtype() if full else None
         from .mlx_model import MLXDecisionModel, load_base, load_full, merge_lora
         if full:
-            lm = load_full(self.path, self.shards(), self.saved_dtype())
+            lm = load_full(self.path, self.shards(), dtype)
         else:
             lm = load_base(resolve_run(f"{self.meta.base}@{self.meta.base_revision or ''}"))   # the base snapshot the torch path already cached
             merge_lora(lm, self.path, opts.lora_scale)
@@ -278,8 +279,7 @@ class Checkpoint:
 
     def _full_torch(self, tok, device, opts):
         """-> (model, True). Full weights load in `saved_dtype`; an explicit dtype still casts on purpose (fp32: the same
-        values computed in fp32). Nothing to merge."""
-        if opts.lora_scale != 1: raise ValueError("lora_scale interpolates an adapter; a full-weight checkpoint has none")
+        values computed in fp32). Nothing to merge (`load` refuses lora_scale for full weights on either backend)."""
         meta = self.meta
         return DecisionModel(meta.base, tok, device, head_dim=meta.head_dim, option_isolation=meta.option_isolation,
                              dtype=opts.dtype or getattr(torch, self.saved_dtype()), attn=opts.attn, weights=self.path), True
