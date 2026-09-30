@@ -145,7 +145,7 @@ modal volume delete kev-hf-cache   # optional: the cached weights (shared with k
   connection; set `KEV_REGION` and reuse the HTTP client.
 - **401 with the right key**: the key is fixed at deploy time; redeploy with the same `KEV_API_KEY` exported.
 - **Long documents**: a state may have up to 65,536 tokens and a question with its options 8,192 more (more when the
-  state is shorter). kev from #192 on refuses a longer state with a 422 that gives its token count and the limit (the
+  state is shorter). kev from #193 on refuses a longer state with a 422 that gives its token count and the limit (the
   TypeSafe SDK raises `TypeSafeUnprocessableEntityError` with that message), as it always did a longer question: shorten
   or split the document. Deploying with `KEV_TRUNCATE_STATES=1` reads only the first 65,536 tokens instead, and then
   every response carries `truncated` and `usage.state_tokens` / `state_tokens_used`. The kev commit this endpoint

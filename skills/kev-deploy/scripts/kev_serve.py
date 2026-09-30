@@ -17,7 +17,7 @@ KEV_FLASH=1 (Modal's experimental direct HTTP server in KEV_REGION: about twice 
 round trip; keeps one container up, since it cannot wake from zero quickly; the URL is
 https://<workspace>--<app>-kev.<region>.modal.direct), KEV_APP_NAME (default "kev"; one app per
 endpoint), KEV_TRUNCATE_STATES=1 (read the first 65,536 tokens of a longer state, and say so on every response, instead
-of refusing it with a 422; kev from #192 on, not yet at the KEV_REF below). The image installs the kev package at
+of refusing it with a 422; kev from #193 on, not yet at the KEV_REF below). The image installs the kev package at
 KEV_REF; weights, compiled kernels and their autotuning results are cached on the `kev-hf-cache` volume, so only the first
 cold start downloads and compiles them. A request that waits longer than 150 s for a cold start gets an HTTP 303 to a
 result URL (Modal's web limit): follow redirects (`curl -L`) or warm the endpoint first.
