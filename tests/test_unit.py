@@ -975,6 +975,31 @@ def test_local_predictor_scores_long_rows_through_the_shared_prefix(tiny_base, t
     assert [x for r in scored for x in r["logits"]] == pytest.approx([x for z in rows["logits"].values() for x in z.values()], abs=1e-5)
 
 
+def test_benchmark_report_records_the_kernel_environment(tiny_base, tmp_path, monkeypatch):
+    """report.json names the kernel set its logits depend on (runs/drift-v1/REPORT.md: a kernel added to the Modal image
+    moved Kev-27B v1's reads with no kev change): package versions, device, GPU, backbone dtype and the Gated DeltaNet
+    convolution and delta rule transformers bound. A kernel patched into the module (the exact-kernel parity tests do
+    that) is what gets named."""
+    import inspect, json, sys
+    from transformers.models.qwen3_5 import modeling_qwen3_5 as Q
+    from kev import benchmark, predictors as P
+    train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "1", monkeypatch=monkeypatch)
+    monkeypatch.setenv("KEV_DTYPE", "fp32")
+    monkeypatch.setattr(sys, "argv", ["kev.benchmark", "--run", str(tmp_path / "full"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--out", str(tmp_path / "read")])
+    benchmark.main()
+    env = json.loads((tmp_path / "read/report.json").read_text(encoding="utf-8"))["environment"]
+    assert env["device"] == "cpu" and env["gpu"] is None and env["backend"] == "torch" and env["dtype"] == "float32"
+    assert env["packages"]["torch"] == torch.__version__ and set(env["packages"]) == set(P.KERNEL_PACKAGES)
+    assert set(env["deltanet"]) == {"causal_conv1d_fn", "torch_chunk_gated_delta_rule"}
+    assert env["deltanet"]["torch_chunk_gated_delta_rule"] == P.bound_implementation(Q.torch_chunk_gated_delta_rule)
+    reference = inspect.unwrap(Q.causal_conv1d_fn)   # transformers' PyTorch convolution, as tests/test_model.py::_exact_kernels patches it in
+    monkeypatch.setattr(Q, "causal_conv1d_fn", reference)
+    assert P.bound_implementation(Q.causal_conv1d_fn) == f"{Q.__name__}.causal_conv1d_fn"
+    predictor = P.LocalPredictor(str(tmp_path / "full"), "cpu", benchmark.LoadOptions.from_env())
+    assert predictor.environment["deltanet"]["causal_conv1d_fn"] == f"{Q.__name__}.causal_conv1d_fn"
+    assert P.bound_implementation(lambda: None).endswith("<lambda>")
+
+
 def test_local_predictor_long_rows_on_mlx_use_its_forward(monkeypatch):
     """The MLX backend (what a hybrid checkpoint resolves to on Apple Silicon) has no forward_batch and its forward already
     runs the state once: a long record goes through model.forward, unlabelled (no CUDA kernels involved)."""

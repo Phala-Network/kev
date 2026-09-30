@@ -4,13 +4,16 @@ LocalPredictor scores a checkpoint in-process; RemotePredictor any TypeSafe Syst
 Jev itself through the AI SDK worker in playground/scripts (budget-capped).
 """
 import contextlib
+import inspect
 import json
 import math
 import os
 import subprocess
+import sys
 import time
 import urllib.request
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import torch
@@ -26,11 +29,44 @@ from kev.suite import CONTEXT
 
 LONG_ROW_KERNELS = "efficient"   # the label of a prediction (and its benchmark rows) that took the long-row kernels below
 
+KERNEL_PACKAGES = ("torch", "transformers", "peft", "flash-linear-attention", "triton", "causal-conv1d", "mlx-lm")
+
+
+def bound_implementation(fn):
+    """The function transformers actually calls for one of its kernel hooks: `use_kernel_func_from_hub_with_fallback`
+    wraps the PyTorch reference and binds the package's kernel (fla, causal-conv1d) as `implementation` when it imports;
+    any other function (unwrapped, or patched in by a caller) is itself. -> "module.qualname"."""
+    impl = inspect.getclosurevars(fn).nonlocals.get("implementation", fn) if inspect.isfunction(fn) else fn
+    return f"{getattr(impl, '__module__', None)}.{getattr(impl, '__qualname__', type(impl).__name__)}"
+
+
+def kernel_environment(model, device):
+    """What a read's logits depend on besides kev's code and the checkpoint (runs/drift-v1/REPORT.md: #125's causal-conv1d
+    kernel moved Kev-27B v1's reads by up to 0.06 in p with no code change): the scoring packages' versions, the GPU, the
+    backbone dtype and, on a hybrid backbone, the Gated DeltaNet convolution and chunked delta rule transformers bound.
+    Two reads are comparable bit for bit only when this and the kev commit match. Recorded in report.json."""
+    def installed(name):
+        try: return version(name)
+        except PackageNotFoundError: return None
+    env = {"packages": {name: installed(name) for name in KERNEL_PACKAGES}, "device": str(device),
+           "gpu": torch.cuda.get_device_name(0) if str(device).startswith("cuda") else None,
+           "backend": getattr(model, "backend", "torch"), "triton_f32_default": os.environ.get("TRITON_F32_DEFAULT")}
+    if env["backend"] != "torch": return env
+    env["dtype"] = str(next(model.lm.parameters()).dtype).removeprefix("torch.")
+    if getattr(model, "hybrid", False):
+        layer = next((m for m in model.lm.modules() if type(m).__name__.endswith("GatedDeltaNet")), None)
+        module = sys.modules.get(type(layer).__module__) if layer is not None else None
+        env["deltanet"] = {name: bound_implementation(getattr(module, name)) for name in ("causal_conv1d_fn", "torch_chunk_gated_delta_rule")
+                           if module is not None and hasattr(module, name)} or None
+    return env
+
 
 class LocalPredictor:
-    """Scores a checkpoint in-process. Evaluation is fp32-exact (no TF32, no fused SDPA kernels on CUDA), with one
-    exception: on CUDA with the torch backend, a record whose longest row (state + one question) exceeds
-    kev.model.ROW_PASS_TOKENS runs under SDPA's flash / memory-efficient kernels, because the exact math kernel's L x L
+    """Scores a checkpoint in-process. Evaluation is fp32-exact in PyTorch (no TF32, no fused SDPA kernels on CUDA). On
+    CUDA a hybrid backbone's Gated DeltaNet layers run flash-linear-attention's Triton kernels, whose dots are TF32, and a
+    bf16 backbone is bf16 throughout, so reads repeat bit for bit only on the same kernel set (`self.environment`, from
+    kernel_environment; AGENTS.md "What fp32-exact guarantees"). One more exception: on CUDA with the torch backend, a
+    record whose longest row (state + one question) exceeds kev.model.ROW_PASS_TOKENS runs under SDPA's flash / memory-efficient kernels, because the exact math kernel's L x L
     score matrix does not fit (~200 GB per layer pass at 64k). Such a prediction carries `"kernels": LONG_ROW_KERNELS`,
     kev.benchmark copies it onto the record's rows and counts them in report.json's `long_rows`; shorter records carry
     nothing, so their rows and reports are unchanged. The efficient path is CUDA-only: on CPU / MPS attention stays eager
@@ -52,6 +88,7 @@ class LocalPredictor:
             torch.backends.cuda.enable_flash_sdp(False); torch.backends.cuda.enable_mem_efficient_sdp(False)
         self.tok, self.model = checkpoint.load(device, opts)
         self.temperature = self.model.head.temperature
+        self.environment = kernel_environment(self.model, device)
         self.device = device
         self.context = context
 
