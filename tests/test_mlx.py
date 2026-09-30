@@ -158,10 +158,10 @@ def test_server_refuses_or_marks_over_length_states_on_mlx(models, monkeypatch):
         assert refused.value.status_code == 422 and refused.value.detail.startswith(f"state is {n:,} tokens, over the {n - 1:,}-token limit")
         assert refuse.batches == 0
         ps, stats = truncate.probs(rec)
-        assert (stats["request_state_tokens"], stats["state_tokens"]) == (n, n - 1)
+        assert (stats["state_tokens"], stats["state_tokens_used"]) == (n, n - 1)
         cut = m.probs(m.encode(tok, rec, max_state=n - 1, max_branch=M.SERVE_MAX_BRANCH))
         assert all(np.allclose(p, c.tolist(), atol=1e-6) for p, c in zip(ps, cut))
         monkeypatch.setattr(M, "SERVE_MAX_STATE", n)
-        assert refuse.probs(rec)[1]["state_tokens"] == n   # exactly at the limit: admitted whole
+        assert refuse.probs(rec)[1]["state_tokens_used"] == n   # exactly at the limit: admitted whole
     finally:
         refuse.close(); truncate.close()

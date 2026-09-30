@@ -167,8 +167,8 @@ class Server:
         sync(self.device); dt = round((time.time() - t) * 1000, 1)
         self.prefix_cache.store(keys, cached, prefixes)
         self.batches += 1; self.batched_requests += len(encs)
-        return [([q.tolist() for q in p], {"tokens": len(enc["ids"]), "state_tokens": enc["seg"].count(0), "request_state_tokens": enc["state_tokens"],
-                                           "latency_ms": dt, "prefix_cache_hit": c is not None})
+        return [([q.tolist() for q in p], {"tokens": len(enc["ids"]), "state_tokens": enc["state_tokens"], "state_tokens_used": enc["seg"].count(0),
+                                           "latency_ms": dt, "prefix_cache_hit": c is not None})   # state_tokens: the request's state; _used: what the model read (less only when truncated)
                 for enc, p, c in zip(encs, ps, cached)]
 
     def wait_idle(self):
@@ -196,8 +196,8 @@ class Server:
         answers = to_answers(ps, meta)
         body = {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
         if self.truncate_states:
-            body["usage"].update(state_tokens=m["request_state_tokens"], state_tokens_used=m["state_tokens"])
-            body["truncated"] = m["request_state_tokens"] > m["state_tokens"]
+            body["usage"].update(state_tokens=m["state_tokens"], state_tokens_used=m["state_tokens_used"])
+            body["truncated"] = m["state_tokens"] > m["state_tokens_used"]
         return body
 
 
@@ -253,7 +253,7 @@ def systemone_permute(r: PermuteSystemOne):
         resp = server().answer(one); a = resp["answers"][r.question]
         runs.append({"order": order, "probabilities": a["probabilities"], "choice": a["choice"], "latency_ms": resp["latency_ms"]})
     spread = {k: max(x["probabilities"][k] for x in runs) - min(x["probabilities"][k] for x in runs) for k in keys}
-    return {"runs": runs, "argmax_stable": len({x["choice"] for x in runs}) == 1, "spread": spread}
+    return truncation_marks({"runs": runs, "argmax_stable": len({x["choice"] for x in runs}) == 1, "spread": spread}, resp)
 
 
 @app.post("/v1/systemone/separate")
@@ -264,8 +264,15 @@ def systemone_separate(req: SystemOneRequest):
     body = {"model": req.model, "answers": answers,
             "usage": {"input_tokens": sum(p["usage"]["input_tokens"] for p in parts), "output_tokens": output_tokens(server().tok, answers)},
             "latency_ms": round(sum(p["latency_ms"] for p in parts), 1)}
-    if "truncated" in parts[0]:   # a truncating server (Server._body): one state, so every part read the same tokens of it
-        body["usage"].update({k: parts[0]["usage"][k] for k in ("state_tokens", "state_tokens_used")}); body["truncated"] = parts[0]["truncated"]
+    return truncation_marks(body, parts[0])
+
+
+def truncation_marks(body, part):
+    """A demo endpoint built from several /v1/systemone answers on one state carries a truncating server's marks
+    (Server._body: `truncated`, usage.state_tokens / state_tokens_used) from any one of them: each read the same tokens."""
+    if "truncated" in part:
+        body["truncated"] = part["truncated"]
+        body.setdefault("usage", {}).update({k: part["usage"][k] for k in ("state_tokens", "state_tokens_used")})
     return body
 
 

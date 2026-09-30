@@ -451,7 +451,13 @@ def test_serve_truncates_only_when_opted_in_and_says_so(tiny_serve):
     code, cut = tiny_serve(request(LIMIT - 1), truncate=True)   # the same state cut by hand to LIMIT tokens
     assert body["answers"] == cut["answers"] and body["usage"]["input_tokens"] == cut["usage"]["input_tokens"]
     code, sep = tiny_serve(request(LIMIT + 5), truncate=True, path="/v1/systemone/separate")
-    assert code == 200 and sep["truncated"] is True and sep["usage"]["state_tokens"] == LIMIT + 6
+    assert code == 200 and sep["truncated"] is True and (sep["usage"]["state_tokens"], sep["usage"]["state_tokens_used"]) == (LIMIT + 6, LIMIT)
+    permute = lambda words, truncate: tiny_serve({"request": request(words), "question": "team", "n_perm": 2}, truncate=truncate, path="/v1/systemone/permute")
+    code, perm = permute(LIMIT + 5, True)
+    assert code == 200 and perm["truncated"] is True and perm["usage"] == {"state_tokens": LIMIT + 6, "state_tokens_used": LIMIT}
+    code, perm = permute(LIMIT - 1, False)
+    assert code == 200 and set(perm) == {"runs", "argmax_stable", "spread"}   # a default server's /permute body is unchanged
+    assert permute(LIMIT, False)[0] == 422
 
 
 def test_serve_refuses_a_long_question_either_way(tiny_serve):
@@ -495,6 +501,68 @@ def test_benchmark_refuses_over_length_records(tiny_model, tmp_path):
         evaluate_records([rec(0, LIMIT - 1), rec(1, LIMIT)], p, tmp_path / "strict")
     report, _ = evaluate_records([rec(0, LIMIT - 1), rec(1, LIMIT), rec(2, 3)], p, tmp_path / "published", skip_overlong=True)
     assert report["coverage"]["rejected_records"] == 1 and report["coverage"]["evaluated_records"] == 2 and report["coverage"]["truncated_records"] == 0
+
+
+@pytest.fixture
+def fake_endpoint():
+    """A local HTTP server standing in for a System One endpoint: -> (base_url, script) where script(state) is a list
+    of (status, body) answers for requests with that state, served in order (the last one repeats), and every request is
+    logged in script.calls."""
+    import http.server, json, threading
+    answers, calls = {}, []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            state = json.loads(self.rfile.read(int(self.headers["content-length"])))["state"]
+            calls.append(state)
+            queue = answers[state]; status, body = queue.pop(0) if len(queue) > 1 else queue[0]
+            data = json.dumps(body).encode()
+            self.send_response(status); self.send_header("content-type", "application/json"); self.send_header("content-length", str(len(data))); self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args): pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    script = lambda state, *replies: answers.__setitem__(state, list(replies))
+    script.calls = calls
+    yield f"http://127.0.0.1:{httpd.server_address[1]}", script
+    httpd.shutdown()
+
+
+def test_remote_predictor_counts_a_refusal_and_retries_only_transient_errors(fake_endpoint, tmp_path, monkeypatch):
+    """kev.benchmark --remote: an endpoint's 422 (kev.serve past its context; 400 / 413 likewise) raises ContextOverflow on
+    the first answer, so evaluate_records counts the record rejected under skip_overlong and stops cleanly otherwise
+    (failure.json names it). A 503 is retried and then answered; a 401 stops at once without retries."""
+    import json
+    from kev import predictors
+    from kev.benchmark import evaluate_records
+    from kev.model import ContextOverflow
+    monkeypatch.setattr(predictors.time, "sleep", lambda s: None)
+    url, script = fake_endpoint
+    ok = {"model": "kev-latest", "answers": {"team": {"type": "choice", "choice": "billing", "confidence": 0.5, "probabilities": {"billing": 0.7, "shipping": 0.2, "refund": 0.1}}},
+          "usage": {"input_tokens": 12, "output_tokens": 30}}
+    refused = {"detail": "state is 70,002 tokens, over the 65,536-token limit (the <state> token included): shorten the document or split it across requests"}
+    rec = lambda state: {**request(1), "state": state, "questions": {"team": {**request(1)["questions"]["team"], "label": "billing", "src": "s"}},
+                         "_meta": {"id": state, "group_id": state, "source": "s", "variant": "clean"}}
+    script("short", (200, ok)); script("long", (422, refused)); script("flaky", (503, {"detail": "busy"}), (503, {"detail": "busy"}), (200, ok)); script("key", (401, {"detail": "bad key"}))
+    p = predictors.RemotePredictor(url, retries=3)
+    with pytest.raises(ContextOverflow, match="HTTP 422.*70,002 tokens"):
+        p(rec("long"))
+    assert script.calls.count("long") == 1                                    # not retried
+    report, _ = evaluate_records([rec("short"), rec("long"), rec("flaky")], p, tmp_path / "published", skip_overlong=True)
+    assert (report["coverage"]["evaluated_records"], report["coverage"]["rejected_records"]) == (2, 1) and script.calls.count("flaky") == 3
+    assert json.loads((tmp_path / "published" / "rejected.json").read_text(encoding="utf-8"))[0]["id"] == "long"
+    with pytest.raises(ContextOverflow):
+        evaluate_records([rec("short"), rec("long")], p, tmp_path / "admitted")
+    assert json.loads((tmp_path / "admitted" / "failure.json").read_text(encoding="utf-8"))["error_type"] == "ContextOverflow"
+    with pytest.raises(RuntimeError, match="HTTP 401: bad key"):
+        p(rec("key"))
+    assert script.calls.count("key") == 1
+    script("down", (503, {"detail": "busy"}))
+    with pytest.raises(RuntimeError, match="failed after 3 attempts"):
+        p(rec("down"))
+    assert script.calls.count("down") == 3
 
 
 def test_option_isolation_mask_rule():
