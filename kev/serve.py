@@ -60,6 +60,21 @@ class PrefixCache:
             survivors.add(key); tokens += len(key[0])
         return keys, [self.entries.get(k) if k is not None else None for k in keys], [k in survivors for k in keys]
 
+    def make_room(self, keys, cached, keep):
+        """Drop now, before the batch runs, the entries this batch's store() will evict anyway, so an old state does not
+        stay resident through the passes of the new one that replaces it. store() inserts every hit and every kept new
+        state as most recent and evicts the least recently used until both bounds hold; evicting the same keys first
+        leaves the same cache (tests/test_unit.py). Kev-4B on MLX: a 64k state's cache is 2.2 GB, so a new 64k state
+        after another one peaked with both (runs/mlx-long-states)."""
+        order = dict.fromkeys(self.entries)                     # least recently used first, as store() evicts
+        for key, old, k in zip(keys, cached, keep):
+            if key is not None and (old is not None or k):
+                order.pop(key, None); order[key] = None
+        count, tokens = len(order), sum(len(k[0]) for k in order)
+        for key in list(order):
+            if count <= self.size and tokens <= self.max_tokens: break
+            self.entries.pop(key, None); count -= 1; tokens -= len(key[0])   # a hit of this batch is still in `cached`
+
     def store(self, keys, cached, prefixes):
         """Record hits and misses, and (re)insert the batch's prefixes in order: most recently used last."""
         for key, old, new in zip(keys, cached, prefixes):
@@ -159,6 +174,7 @@ class Server:
         sync(self.device); t = time.time()
         for retry in (False, True):
             keys, cached, keep = self.prefix_cache.plan(encs)
+            self.prefix_cache.make_room(keys, cached, keep)
             try: ps, prefixes = self.model.probs_batch(encs, cached, keep); break
             except Exception as e:
                 if retry or not self.prefix_cache.entries or not out_of_memory(e): raise

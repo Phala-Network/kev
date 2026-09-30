@@ -301,6 +301,27 @@ def test_prefix_reuse_and_question_isolation(models):
         m.probs_with_prefix(m.encode(tok, {**rec, "state": rec["state"] + " extra words here"}), prefix)
 
 
+def test_chunked_state_prefill(models, monkeypatch):
+    """prefix() runs the state PREFILL_CHUNK tokens per pass into the prompt cache. With a chunk that splits every record's
+    state into three passes (these states are 5-27 tokens, so 2-9-token passes: the stress case; the server's are 1,024),
+    the answers stay within bf16 noise of the fp32 torch path and of the one-pass prefix, and the cache holds exactly the
+    state. Measured on these 12 records: max |dp| 0.025 against fp32 torch (one pass: 0.011), 0.019 against the one-pass
+    prefix, one argmax flip on a question whose fp32 top-2 margin is 0.024; hence the prefix test's tie bar, not 0.02."""
+    import kev.mlx_model as MM
+    tok, m, ref, recs = models
+    for rec in recs:
+        enc = m.encode(tok, rec)
+        Ls = enc["seg"].count(0)
+        monkeypatch.setattr(MM, "PREFILL_CHUNK", 10 ** 9); one = m.probs(enc)
+        assert Ls >= 5
+        monkeypatch.setattr(MM, "PREFILL_CHUNK", (Ls + 2) // 3)   # three passes, the last one shorter unless Ls % 3 == 0
+        n, cache = m.prefix(enc)
+        assert n == Ls and {c.offset for c in cache if hasattr(c, "offset")} == {Ls}
+        chunked = m.probs_with_prefix(enc, (n, cache))
+        near(chunked, ref.probs(ref.encode(tok, rec)), bar=0.04, tie=0.04)
+        near(chunked, one, bar=0.04, tie=0.04)
+
+
 def test_server_refuses_or_marks_over_length_states_on_mlx(models, monkeypatch):
     """kev.serve on the MLX backend admits like the torch one (kev.model.admit): with the state limit set just under a
     real record's state, the default server answers 422 before the model runs, and a truncating server reads exactly the

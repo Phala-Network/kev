@@ -1,0 +1,48 @@
+{
+  "run": "jaredpalmer/kev-4b",
+  "path": "/Users/jared/.cache/huggingface/hub/models--jaredpalmer--kev-4b/snapshots/139fdd94f1b6a6ad80cc15e08fcb99cac885a101",
+  "machine": {
+    "chip": "Apple M5",
+    "memory_gb": 34.36,
+    "macos": "26.6.2",
+    "mlx": "0.32.2",
+    "mlx_lm": "0.31.3",
+    "torch": "2.8.0"
+  },
+  "lengths": {
+    "8192": {
+      "one pass": {
+        "seconds": 6.77,
+        "peak_above_weights_gb": 4.6,
+        "vs_one_pass": {
+          "max_dp": 0.0,
+          "argmax_flips": []
+        }
+      },
+      "1024": {
+        "seconds": 6.5,
+        "peak_above_weights_gb": 1.16,
+        "vs_one_pass": {
+          "max_dp": 0.00297,
+          "argmax_flips": []
+        }
+      },
+      "2048": {
+        "seconds": 6.58,
+        "peak_above_weights_gb": 1.78,
+        "vs_one_pass": {
+          "max_dp": 0.00094,
+          "argmax_flips": []
+        }
+      },
+      "4096": {
+        "seconds": 6.85,
+        "peak_above_weights_gb": 2.71,
+        "vs_one_pass": {
+          "max_dp": 0.0,
+          "argmax_flips": []
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "run": "jaredpalmer/kev-0.8b",
+  "path": "/Users/jared/.cache/huggingface/hub/models--jaredpalmer--kev-0.8b/snapshots/9a45d25eb2ab761841196625383fa1dff0e56c1e",
+  "machine": {
+    "chip": "Apple M5",
+    "memory_gb": 34.36,
+    "macos": "26.6.2",
+    "mlx": "0.32.2",
+    "mlx_lm": "0.31.3",
+    "torch": "2.8.0"
+  },
+  "lengths": {
+    "8192": {
+      "one pass": {
+        "seconds": 1.44,
+        "peak_above_weights_gb": 2.74,
+        "vs_one_pass": {
+          "max_dp": 0.0,
+          "argmax_flips": []
+        }
+      },
+      "1024": {
+        "seconds": 1.38,
+        "peak_above_weights_gb": 0.99,
+        "vs_one_pass": {
+          "max_dp": 0.00398,
+          "argmax_flips": []
+        }
+      },
+      "2048": {
+        "seconds": 1.38,
+        "peak_above_weights_gb": 1.2,
+        "vs_one_pass": {
+          "max_dp": 0.0,
+          "argmax_flips": []
+        }
+      },
+      "4096": {
+        "seconds": 1.4,
+        "peak_above_weights_gb": 1.71,
+        "vs_one_pass": {
+          "max_dp": 0.0,
+          "argmax_flips": []
+        }
+      }
+    },
+    "16384": {
+      "one pass": {
+        "seconds": 3.39,
+        "peak_above_weights_gb": 4.92,
+        "vs_one_pass": {
+          "max_dp": 0.0,
+          "argmax_flips": []
+        }
+      },
+      "1024": {
+        "seconds": 3.02,
+        "peak_above_weights_gb": 1.06,
+        "vs_one_pass": {
+          "max_dp": 0.0055,
+          "argmax_flips": []
+        }
+      },
+      "2048": {
+        "seconds": 2.99,
+        "peak_above_weights_gb": 1.27,
+        "vs_one_pass": {
+          "max_dp": 0.0,
+          "argmax_flips": []
+        }
+      },
+      "4096": {
+        "seconds": 3.04,
+        "peak_above_weights_gb": 1.81,
+        "vs_one_pass": {
+          "max_dp": 0.0,
+          "argmax_flips": []
+        }
+      }
+    }
+  }
+}
