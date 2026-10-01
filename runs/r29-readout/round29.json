@@ -288,9 +288,7 @@
         "candidate:runs/r29-9b-r7-s1-longdoc",
         "candidate:runs/r29-9b-r7-s1-longdoc",
         "candidate:runs/r29-9b-r7-s1-agentsood",
-        "parent:runs/r29-P9-agentsood",
-        "candidate:runs/r29-9b-r7-s1-guardood",
-        "parent:runs/r29-P9-guardood"
+        "candidate:runs/r29-9b-r7-s1-guardood"
       ],
       "unknowable": {
         "candidate": 0.0,
@@ -595,9 +593,7 @@
         "candidate:runs/r29-9b-r7-s2-longdoc",
         "candidate:runs/r29-9b-r7-s2-longdoc",
         "candidate:runs/r29-9b-r7-s2-agentsood",
-        "parent:runs/r29-P9-agentsood",
-        "candidate:runs/r29-9b-r7-s2-guardood",
-        "parent:runs/r29-P9-guardood"
+        "candidate:runs/r29-9b-r7-s2-guardood"
       ],
       "unknowable": {
         "candidate": 0.0,
@@ -902,9 +898,7 @@
         "candidate:runs/r29-9b-r9-a-longdoc",
         "candidate:runs/r29-9b-r9-a-longdoc",
         "candidate:runs/r29-9b-r9-a-agentsood",
-        "parent:runs/r29-P9-agentsood",
-        "candidate:runs/r29-9b-r9-a-guardood",
-        "parent:runs/r29-P9-guardood"
+        "candidate:runs/r29-9b-r9-a-guardood"
       ],
       "unknowable": {
         "candidate": 0.0,
@@ -1209,9 +1203,7 @@
         "candidate:runs/r29-9b-r9-b-longdoc",
         "candidate:runs/r29-9b-r9-b-longdoc",
         "candidate:runs/r29-9b-r9-b-agentsood",
-        "parent:runs/r29-P9-agentsood",
-        "candidate:runs/r29-9b-r9-b-guardood",
-        "parent:runs/r29-P9-guardood"
+        "candidate:runs/r29-9b-r9-b-guardood"
       ],
       "unknowable": {
         "candidate": 0.0,
@@ -1516,9 +1508,7 @@
         "candidate:runs/r29-9b-r9-c-longdoc",
         "candidate:runs/r29-9b-r9-c-longdoc",
         "candidate:runs/r29-9b-r9-c-agentsood",
-        "parent:runs/r29-P9-agentsood",
-        "candidate:runs/r29-9b-r9-c-guardood",
-        "parent:runs/r29-P9-guardood"
+        "candidate:runs/r29-9b-r9-c-guardood"
       ],
       "unknowable": {
         "candidate": 0.0,
@@ -1823,9 +1813,7 @@
         "candidate:runs/r29-9b-r11-s4-longdoc",
         "candidate:runs/r29-9b-r11-s4-longdoc",
         "candidate:runs/r29-9b-r11-s4-agentsood",
-        "parent:runs/r29-P9-agentsood",
-        "candidate:runs/r29-9b-r11-s4-guardood",
-        "parent:runs/r29-P9-guardood"
+        "candidate:runs/r29-9b-r11-s4-guardood"
       ],
       "unknowable": {
         "candidate": 0.0,
@@ -2130,9 +2118,7 @@
         "candidate:runs/r29-9b-r11-s5-longdoc",
         "candidate:runs/r29-9b-r11-s5-longdoc",
         "candidate:runs/r29-9b-r11-s5-agentsood",
-        "parent:runs/r29-P9-agentsood",
-        "candidate:runs/r29-9b-r11-s5-guardood",
-        "parent:runs/r29-P9-guardood"
+        "candidate:runs/r29-9b-r11-s5-guardood"
       ],
       "unknowable": {
         "candidate": 0.0,
@@ -2437,9 +2423,7 @@
         "candidate:runs/r29-9b-r16-lr1e5-longdoc",
         "candidate:runs/r29-9b-r16-lr1e5-longdoc",
         "candidate:runs/r29-9b-r16-lr1e5-agentsood",
-        "parent:runs/r29-P9-agentsood",
-        "candidate:runs/r29-9b-r16-lr1e5-guardood",
-        "parent:runs/r29-P9-guardood"
+        "candidate:runs/r29-9b-r16-lr1e5-guardood"
       ],
       "unknowable": {
         "candidate": 0.0,
@@ -2744,9 +2728,7 @@
         "candidate:runs/r29-9b-r16-lr2e5-longdoc",
         "candidate:runs/r29-9b-r16-lr2e5-longdoc",
         "candidate:runs/r29-9b-r16-lr2e5-agentsood",
-        "parent:runs/r29-P9-agentsood",
-        "candidate:runs/r29-9b-r16-lr2e5-guardood",
-        "parent:runs/r29-P9-guardood"
+        "candidate:runs/r29-9b-r16-lr2e5-guardood"
       ],
       "unknowable": {
         "candidate": 0.0,
@@ -3395,6 +3377,48 @@
               0.017495488888730624
             ]
           }
+        },
+        "agents_ood": {
+          "n": 2084,
+          "acc": {
+            "candidate": 0.8258157389635317,
+            "parent": 0.8301343570057581,
+            "delta": -0.004318618042226441,
+            "ci95": [
+              -0.018498550532338728,
+              0.00991690094150182
+            ]
+          },
+          "ece": {
+            "candidate": 0.13884293650690255,
+            "parent": 0.0661625805542695,
+            "delta": 0.07268035595263299,
+            "ci95": [
+              0.05679793931395719,
+              0.08371449008385719
+            ]
+          }
+        },
+        "guardrails_ood": {
+          "n": 4949,
+          "acc": {
+            "candidate": 0.7310567791473025,
+            "parent": 0.7304505960800162,
+            "delta": 0.0006061830672863255,
+            "ci95": [
+              -0.008693818769031147,
+              0.010038223807216352
+            ]
+          },
+          "ece": {
+            "candidate": 0.02141977706942881,
+            "parent": 0.04321188112013248,
+            "delta": -0.021792104050703694,
+            "ci95": [
+              -0.0399556543140153,
+              -0.0034309551320554146
+            ]
+          }
         }
       },
       "missing": [],
@@ -3448,12 +3472,6 @@
         "training_corpus": true,
         "shipped": 2.2973967099940698
       },
-      "missing_optional": [
-        "candidate:runs/r29-9b-r18a-agentsood",
-        "parent:runs/r29-P9-agentsood",
-        "candidate:runs/r29-9b-r18a-guardood",
-        "parent:runs/r29-P9-guardood"
-      ],
       "unknowable": {
         "candidate": 0.0,
         "parent": 0.0
@@ -3757,9 +3775,7 @@
         "candidate:runs/r29-9b-r18b-longdoc",
         "candidate:runs/r29-9b-r18b-longdoc",
         "candidate:runs/r29-9b-r18b-agentsood",
-        "parent:runs/r29-P9-agentsood",
-        "candidate:runs/r29-9b-r18b-guardood",
-        "parent:runs/r29-P9-guardood"
+        "candidate:runs/r29-9b-r18b-guardood"
       ],
       "unknowable": {
         "candidate": 0.0,
