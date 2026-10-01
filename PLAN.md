@@ -45,10 +45,10 @@ Kev-27B on the Hub only.
 
 | size | checkpoint (trial) | Hub revision (weights) | T (fit) | locked transfer-v4 acc / Brier | breadth-v1 test index (all 14) | transfer-v4 dev | validated context |
 |---|---|---|---|---|---|---|---|
-| Kev-0.8B | `r15-08b/00-trial-0` | `9a45d25e` | 2.35 (in-distribution; kept by round 28) | 0.697 / 0.397 | 23.3 [21.2, 25.9] | 0.648 | {{VALIDATED_CONTEXT_08B}} |
-| Kev-4B | `r10-skills/00-trial-0` | `139fdd94` | 2.41 (in-distribution; kept by round 28) | 0.838 / 0.224 | 38.0 [35.5, 41.3] | 0.817 | {{VALIDATED_CONTEXT_4B}} |
-| Kev-9B v2 | `r18-9b/00-trial-0` (round 27 `9b-r18a`) | `b5d8c18e` | 2.19 (held-out pool) | 0.852 / 0.199 | 41.0 [38.8, 43.9] | 0.820 | {{VALIDATED_CONTEXT_9B}} |
-| Kev-27B v2 | round 23 `27b-k-w85` | `28be62e9` (main `ef78cc8a`: card commits since) | 1.32 (held-out pool) | 0.889 / 0.154 | 52.3 [49.2, 55.4] | 0.851 | {{VALIDATED_CONTEXT_27B}} |
+| Kev-0.8B | `r15-08b/00-trial-0` | `9a45d25e` | 2.35 (in-distribution; kept by round 28) | 0.697 / 0.397 | 23.3 [21.2, 25.9] | 0.648 | 8,192 (16k lower bound −8.5 pp, `runs/r28-readout/context.json`) |
+| Kev-4B | `r10-skills/00-trial-0` | `139fdd94` | 2.41 (in-distribution; kept by round 28) | 0.838 / 0.224 | 38.0 [35.5, 41.3] | 0.817 | 8,192 (16k lower bound −3.4 pp, `runs/r28-readout/context.json`) |
+| Kev-9B v2 | `r18-9b/00-trial-0` (round 27 `9b-r18a`) | `b5d8c18e` | 2.19 (held-out pool) | 0.852 / 0.199 | 41.0 [38.8, 43.9] | 0.820 | 8,192 (16k lower bound −3.7 pp, `runs/r28-readout/context.json`) |
+| Kev-27B v2 | round 23 `27b-k-w85` | `28be62e9` (main `ef78cc8a`: card commits since) | 1.32 (held-out pool) | 0.889 / 0.154 | 52.3 [49.2, 55.4] | 0.851 | 65,536 (64k lower bound −2.4 pp, `runs/r28-readout/context.json`) |
 | Jev (reference) | hosted | – | – | not read | 54.0 [51.2, 57.0] | 0.857 | – |
 
 - Index: `runs/fam-breadth-test-report/report.json` (2026-09-30 family reads; Kev-27B v2's row is round 23's

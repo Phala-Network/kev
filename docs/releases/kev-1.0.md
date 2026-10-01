@@ -6,10 +6,10 @@ Kev 1.0 is the first versioned release of the whole Kev family: four decision mo
 
 | Model | Hub repo | Weights revision | Form | Base | Temperature | Validated context |
 |---|---|---|---|---|---|---|
-| Kev-0.8B | [`jaredpalmer/kev-0.8b`](https://huggingface.co/jaredpalmer/kev-0.8b) | `9a45d25e` | LoRA adapter + head | Qwen3.5-0.8B-Base (Apache-2.0) | 2.35 | {{VALIDATED_CONTEXT_08B}} |
-| Kev-4B | [`jaredpalmer/kev-4b`](https://huggingface.co/jaredpalmer/kev-4b) | `139fdd94` | LoRA adapter + head | Qwen3.5-4B-Base (Apache-2.0) | 2.41 | {{VALIDATED_CONTEXT_4B}} |
-| Kev-9B (v2) | [`jaredpalmer/kev-9b`](https://huggingface.co/jaredpalmer/kev-9b) | `b5d8c18e` | LoRA adapter + head | Qwen3.5-9B-Base (Apache-2.0) | 2.19 | {{VALIDATED_CONTEXT_9B}} |
-| Kev-27B (v2) | [`jaredpalmer/kev-27b`](https://huggingface.co/jaredpalmer/kev-27b) | `28be62e9` | full bf16 weights (51 GB) + head | Qwen3.8-27B, post-trained (Apache-2.0) | 1.32 | {{VALIDATED_CONTEXT_27B}} |
+| Kev-0.8B | [`jaredpalmer/kev-0.8b`](https://huggingface.co/jaredpalmer/kev-0.8b) | `9a45d25e` | LoRA adapter + head | Qwen3.5-0.8B-Base (Apache-2.0) | 2.35 | 8,192 tokens |
+| Kev-4B | [`jaredpalmer/kev-4b`](https://huggingface.co/jaredpalmer/kev-4b) | `139fdd94` | LoRA adapter + head | Qwen3.5-4B-Base (Apache-2.0) | 2.41 | 8,192 tokens |
+| Kev-9B (v2) | [`jaredpalmer/kev-9b`](https://huggingface.co/jaredpalmer/kev-9b) | `b5d8c18e` | LoRA adapter + head | Qwen3.5-9B-Base (Apache-2.0) | 2.19 | 8,192 tokens |
+| Kev-27B (v2) | [`jaredpalmer/kev-27b`](https://huggingface.co/jaredpalmer/kev-27b) | `28be62e9` | full bf16 weights (51 GB) + head | Qwen3.8-27B, post-trained (Apache-2.0) | 1.32 | 65,536 tokens |
 
 Headline numbers (fp32 evaluation path, each model at its shipped temperature; the transfer-v4 test is locked and was read once per model):
 
@@ -38,7 +38,7 @@ Measured from the GitHub release `kev-family` as first assembled for the current
 - **Evaluation audit.** Three suites were removed as unsound for selecting models: scienthoon (templated tickets, one question the text cannot answer), WANLI-v2 / WANLI-v1 (a quarter of gold labels are one of two disagreeing annotators) and TypeSafe's public evals (gold from two closed models, too few questions). Headline panels exclude items the audit found unanswerable or unlabelled. Past releases' figures on those suites are kept in their records, not on the 1.0 cards.
 - **Calibration.** Kev-4B and Kev-0.8B ship temperatures fitted on held-out items of their training data. A registered refit on held-out datasets was evaluated for both and adopted for neither: it did not improve Kev-4B (Brier difference −0.0001 [−0.0005, +0.0003]), and it made Kev-0.8B worse calibrated on its document and skill families by more than the registered tolerance. Kev-9B and Kev-27B already ship held-out-dataset temperatures.
 - **Training data published.** The documents-v1 and hard-v1 training partitions are in the `jaredpalmer/kev-suites` dataset, so the small models' training data can be fetched and hash-checked.
-- **Validated context length.** Each card now states the longest state at which accuracy on CUAD contracts stays within 3 pp (95 % lower bound) of the same model at 8k tokens.
+- **Validated context length.** Each card now states the longest state at which accuracy on CUAD contracts stays within 3 pp (95 % lower bound) of the same model at 8k tokens. Kev-27B holds to 65,536 tokens, the serving limit (its 64k lower bound is −2.4 pp). Kev-0.8B, 4B and 9B validate only their trained 8,192: each already misses the tolerance at 16k (lower bounds −8.5, −3.4 and −3.7 pp), so past 8k tokens their answers on long documents are not covered by the measurement.
 - **Formal model cards.** All four cards follow one structure: summary, details, intended and out-of-scope uses, how to use, training data and procedure, evaluation, limitations, risks, compute, provenance.
 
 ## Known limitations
@@ -72,9 +72,9 @@ The TypeSafe SDK works unchanged: `TypeSafeClient(api_key="local", base_url="htt
 
 ## Release plan (for the maintainer; not part of the published notes)
 
-Nothing below has been done. Order:
+Nothing below step 1 has been done. Order:
 
-1. **Fill the placeholders.** `{{VALIDATED_CONTEXT_08B}}`, `{{VALIDATED_CONTEXT_4B}}`, `{{VALIDATED_CONTEXT_9B}}`, `{{VALIDATED_CONTEXT_27B}}` (README, the four cards, these notes, PLAN.md) and `{{LONGDOC_DEV_BY_BUCKET_08B}}`, `{{LONGDOC_DEV_BY_BUCKET_4B}}`, `{{LONGDOC_DEV_BY_BUCKET_9B}}` (cards) from the longdoc-v1 development reads (`scripts/longdoc_report.py --context-margin -0.03`; Kev-27B from round 23's `r23-27b-k-w85-longdoc` read). Add the numbers to `docs/claims.json`; `scripts/verify_claims.py` must pass. `scripts/build_release_assets.py` refuses a card that still holds a placeholder.
+1. **Placeholders: filled** (2026-10-01) from round 28's registered context read-out, `runs/r28-readout/context.json` (`scripts/longdoc_report.py --context-margin -0.03` over `runs/r28-{4b-r10,08b-r15}-longdoc`, `runs/r29-9b-r18a-longdoc` and `runs/r23-27b-k-w85-longdoc`; raw `runs/r28-context`, ECE at the shipped T `runs/r28-context-served`), with the numbers in `docs/claims.json`.
 2. **Merge** this PR.
 3. **Hub cards.** Upload each 1.0 card as `README.md` only (no weights): `kev.publish` is not needed for a card-only commit; `hf upload jaredpalmer/kev-<size> docs/model-cards/kev-<size>.md README.md --commit-message "Kev 1.0 model card (weights unchanged)"`. Check with `HfApi().model_info(..., files_metadata=True)` that `adapter_model.safetensors` / `head.pt` (27B: `model.safetensors.index.json` and every shard) hash as below.
 4. **Hub tags.** `v1.0` on all four repos. Default (as specified): the exact weight revisions; if step 3 ran first, tag the card commit instead so that `@v1.0` shows the 1.0 card (the weights are byte-identical; record both commits in PLAN.md).

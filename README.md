@@ -29,10 +29,10 @@ Start with Kev-4B. Move to Kev-9B if you have a bigger GPU, or to Kev-27B if you
 
 | Model | Base (license) | Runs on: CUDA | Runs on: Mac (MLX) | Validated context | Held-out datasets: index | Card |
 |---|---|---|---|---|---|---|
-| [Kev-0.8B](https://huggingface.co/jaredpalmer/kev-0.8b) | Qwen3.5-0.8B-Base (Apache-2.0) | L4, any 4 GB GPU | Any Apple Silicon Mac; measured to 65k tokens | {{VALIDATED_CONTEXT_08B}} | 23.3 | [Details](docs/model-cards/kev-0.8b.md) |
-| [Kev-4B](https://huggingface.co/jaredpalmer/kev-4b) | Qwen3.5-4B-Base (Apache-2.0) | L40S, H100 | 32 GB Mac; measured to 65k tokens | {{VALIDATED_CONTEXT_4B}} | 38.0 | [Details](docs/model-cards/kev-4b.md) |
-| [Kev-9B](https://huggingface.co/jaredpalmer/kev-9b) | Qwen3.5-9B-Base (Apache-2.0) | L40S, H100 | 32 GB Mac or larger (expected, not measured) | {{VALIDATED_CONTEXT_9B}} | 41.0 | [Details](docs/model-cards/kev-9b.md) |
-| [Kev-27B](https://huggingface.co/jaredpalmer/kev-27b) | Qwen3.8-27B, post-trained (Apache-2.0) | B200, H200, H100 80 GB | 96–128 GB Mac (expected, not measured) | {{VALIDATED_CONTEXT_27B}} | **52.3** | [Details](docs/model-cards/kev-27b.md) |
+| [Kev-0.8B](https://huggingface.co/jaredpalmer/kev-0.8b) | Qwen3.5-0.8B-Base (Apache-2.0) | L4, any 4 GB GPU | Any Apple Silicon Mac; measured to 65k tokens | 8,192 | 23.3 | [Details](docs/model-cards/kev-0.8b.md) |
+| [Kev-4B](https://huggingface.co/jaredpalmer/kev-4b) | Qwen3.5-4B-Base (Apache-2.0) | L40S, H100 | 32 GB Mac; measured to 65k tokens | 8,192 | 38.0 | [Details](docs/model-cards/kev-4b.md) |
+| [Kev-9B](https://huggingface.co/jaredpalmer/kev-9b) | Qwen3.5-9B-Base (Apache-2.0) | L40S, H100 | 32 GB Mac or larger (expected, not measured) | 8,192 | 41.0 | [Details](docs/model-cards/kev-9b.md) |
+| [Kev-27B](https://huggingface.co/jaredpalmer/kev-27b) | Qwen3.8-27B, post-trained (Apache-2.0) | B200, H200, H100 80 GB | 96–128 GB Mac (expected, not measured) | 65,536 | **52.3** | [Details](docs/model-cards/kev-27b.md) |
 | Jev | Hosted | TypeSafe's API | – | – | 54.0 | – |
 
 "Held-out datasets" is the chance-corrected index of the community Decision Index, scored on the test split of `breadth-v1`: 14 public datasets in five areas that no Kev trained on. "Validated context" is the longest document, in tokens, for which accuracy on real contracts (CUAD) stays within 3 points of the same model's accuracy at 8k tokens, at the 95 % lower bound; each model card has the measurement by length.
@@ -217,7 +217,7 @@ A model you fine-tuned with the `kev-finetune` skill deploys the same way from i
 
 **Speed.** Kev-4B answers six questions about a new short text in 18.1 ms of model time on an H100 and 41.5 ms on an L40S, and a container serves around 101 requests per second on an H100. On an Apple M5, Kev-4B takes 721 ms for five questions, or 136 ms when the text repeats and comes from the cache. [Serving Performance](#serving-performance) has every GPU and batch size.
 
-**Length.** Kev-0.8B, 4B and 9B trained mostly on states of up to 384 tokens, with longer ones in their document and skill fine-tunes (up to 7,552 tokens), Kev-27B on states of up to 32,768. The server accepts states of up to 65,536 tokens, and 8,192 more for each question, and refuses a longer one with a 422 instead of cutting it. How far past its training length each model stays accurate is the "Validated context" column in [Models](#models). On real contracts of up to 64k tokens (CUAD) Kev-27B scores 0.874, and its confidence there is less reliable than on short text; its [model card](docs/model-cards/kev-27b.md) has the numbers by length.
+**Length.** Kev-0.8B, 4B and 9B trained mostly on states of up to 384 tokens, with longer ones in their document and skill fine-tunes (up to 7,552 tokens), Kev-27B on states of up to 32,768. The server accepts states of up to 65,536 tokens, and 8,192 more for each question, and refuses a longer one with a 422 instead of cutting it. How far past its training length each model stays accurate is the "Validated context" column in [Models](#models). For Kev-0.8B, 4B and 9B that is 8,192 tokens: at 16k the measurement on real contracts can no longer rule out a drop of more than 3 points, and at 32k all three are measurably less accurate than at 8k. Kev-27B holds to the 65,536-token limit. On real contracts of up to 64k tokens (CUAD) Kev-27B scores 0.874, and its confidence there is less reliable than on short text; its [model card](docs/model-cards/kev-27b.md) has the numbers by length.
 
 ## Playground
 

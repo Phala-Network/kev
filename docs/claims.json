@@ -11895,5 +11895,1416 @@
       "locked_transfer",
       "acc"
     ]
+  },
+  {
+    "printed": "0.779",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "4k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.128",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "4k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "443",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "4k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "0.711",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "8k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.066",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "8k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "453",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "8k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "0.659",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "16k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.047",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "16k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "452",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "16k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "0.663",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "32k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.055",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "32k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "454",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "32k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "0.637",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "64k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.038",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "64k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "452",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "64k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "5.2",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "delta"
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "8.5",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "2.1",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      1
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "6.0",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "32k",
+      "cuad_paired_vs_8k",
+      "delta"
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "9.5",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "32k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "2.5",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "32k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      1
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "7.9",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "delta"
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "11.8",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "4.2",
+    "in": [
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      1
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "8,192",
+    "in": [
+      "README.md",
+      "PLAN.md",
+      "docs/releases/kev-1.0.md",
+      "docs/model-cards/kev-0.8b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "validated_context",
+      "validated_tokens"
+    ]
+  },
+  {
+    "printed": "8.5",
+    "in": [
+      "PLAN.md",
+      "docs/releases/kev-1.0.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-0.8B",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "0.847",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "4k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.047",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "4k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "443",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "4k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "0.837",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "8k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.048",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "8k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "453",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "8k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "0.823",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "16k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.057",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "16k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "452",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "16k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "0.788",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "32k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.022",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "32k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "454",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "32k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "0.781",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "64k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.035",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "64k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "452",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "64k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "1.1",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "delta"
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "3.4",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "1.2",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      1
+    ],
+    "scale": 100
+  },
+  {
+    "printed": "5.8",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "32k",
+      "cuad_paired_vs_8k",
+      "delta"
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "9.0",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "32k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "2.8",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "32k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      1
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "5.2",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "delta"
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "8.2",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "2.0",
+    "in": [
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      1
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "8,192",
+    "in": [
+      "README.md",
+      "PLAN.md",
+      "docs/releases/kev-1.0.md",
+      "docs/model-cards/kev-4b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "validated_context",
+      "validated_tokens"
+    ]
+  },
+  {
+    "printed": "3.4",
+    "in": [
+      "PLAN.md",
+      "docs/releases/kev-1.0.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-4B",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "0.876",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "4k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.049",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "4k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "443",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "4k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "0.850",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "8k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.051",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "8k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "453",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "8k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "0.839",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "16k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.033",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "16k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "452",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "16k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "0.819",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "32k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.041",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "32k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "454",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "32k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "0.801",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "64k",
+      "cuad",
+      "acc"
+    ]
+  },
+  {
+    "printed": "0.056",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context-served/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "64k",
+      "cuad",
+      "ece"
+    ]
+  },
+  {
+    "printed": "452",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "64k",
+      "cuad",
+      "questions"
+    ]
+  },
+  {
+    "printed": "1.4",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "delta"
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "3.7",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "0.9",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      1
+    ],
+    "scale": 100
+  },
+  {
+    "printed": "3.6",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "32k",
+      "cuad_paired_vs_8k",
+      "delta"
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "6.4",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "32k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "0.9",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "32k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      1
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "5.2",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "delta"
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "7.9",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "2.5",
+    "in": [
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      1
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "8,192",
+    "in": [
+      "README.md",
+      "PLAN.md",
+      "docs/releases/kev-1.0.md",
+      "docs/model-cards/kev-9b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "validated_context",
+      "validated_tokens"
+    ]
+  },
+  {
+    "printed": "3.7",
+    "in": [
+      "PLAN.md",
+      "docs/releases/kev-1.0.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-9B v2",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "0.2",
+    "in": [
+      "docs/model-cards/kev-27b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-27B v2",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "delta"
+    ],
+    "scale": 100
+  },
+  {
+    "printed": "0.7",
+    "in": [
+      "docs/model-cards/kev-27b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-27B v2",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "1.2",
+    "in": [
+      "docs/model-cards/kev-27b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-27B v2",
+      "buckets",
+      "16k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      1
+    ],
+    "scale": 100
+  },
+  {
+    "printed": "0.2",
+    "in": [
+      "docs/model-cards/kev-27b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-27B v2",
+      "buckets",
+      "32k",
+      "cuad_paired_vs_8k",
+      "delta"
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "1.2",
+    "in": [
+      "docs/model-cards/kev-27b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-27B v2",
+      "buckets",
+      "32k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "0.7",
+    "in": [
+      "docs/model-cards/kev-27b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-27B v2",
+      "buckets",
+      "32k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      1
+    ],
+    "scale": 100
+  },
+  {
+    "printed": "1.1",
+    "in": [
+      "docs/model-cards/kev-27b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-27B v2",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "delta"
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "2.4",
+    "in": [
+      "docs/model-cards/kev-27b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-27B v2",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
+  },
+  {
+    "printed": "0.0",
+    "in": [
+      "docs/model-cards/kev-27b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-27B v2",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      1
+    ],
+    "scale": 100
+  },
+  {
+    "printed": "65,536",
+    "in": [
+      "README.md",
+      "PLAN.md",
+      "docs/releases/kev-1.0.md",
+      "docs/model-cards/kev-27b.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-27B v2",
+      "validated_context",
+      "validated_tokens"
+    ]
+  },
+  {
+    "printed": "2.4",
+    "in": [
+      "PLAN.md",
+      "docs/releases/kev-1.0.md"
+    ],
+    "source": "runs/r28-context/report.json",
+    "path": [
+      "systems",
+      "Kev-27B v2",
+      "buckets",
+      "64k",
+      "cuad_paired_vs_8k",
+      "ci95",
+      0
+    ],
+    "scale": -100
   }
 ]

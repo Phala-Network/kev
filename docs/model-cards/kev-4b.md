@@ -75,7 +75,7 @@ Kev-4B is a decision model. It reads one document (the *state*) and a set of typ
 | Head | Pointer head: two projections score each option's closing token against the question's final token; a softmax gives the probabilities |
 | Precision | Trained with bf16 autocast over fp32 weights; served in bf16 (the adapter is merged into the base at load time); evaluated in fp32 |
 | Context | States of up to 65,536 tokens are served, plus at least 8,192 tokens per question. Training states were at most 7,552 tokens. |
-| Validated context length | {{VALIDATED_CONTEXT_4B}} (see Long documents) |
+| Validated context length | 8,192 tokens (see Long documents) |
 | Calibration | One temperature, T = 2.41, stored in `head.pt` and applied at load time |
 | Languages | English |
 | License | Apache-2.0 (adapter and head); the base model is Apache-2.0 |
@@ -207,12 +207,20 @@ Jev's devtools-v1 figure is over all 1,074 development questions; Kev's rows dro
 
 **Long documents.**
 
-- Validated context length: {{VALIDATED_CONTEXT_4B}}.
+- Validated context length: 8,192 tokens, the trained length. The 16k bucket is outside the tolerance: its lower bound is −3.4 pp, below −3 pp, so no longer length is validated.
 - Rule, fixed before the read: the validated length is the nominal size of the largest bucket from 16,384 tokens up such that it, and every bucket between it and 8,192, is within tolerance. Within tolerance means the CUAD accuracy difference from the 8k bucket (states of 6,553–7,618 tokens, the trained length), paired on the same contract, repeat and question, has a 95 % lower bound of at least −3 pp, and every record was answered. If the 16k bucket fails, the validated length is 8,192 tokens.
 
 CUAD accuracy, ECE and the paired difference from the 8k bucket by nominal state length (longdoc-v1 development):
 
-{{LONGDOC_DEV_BY_BUCKET_4B}}
+| Nominal state length | CUAD questions | Accuracy | ECE | Δ vs 8k, pp [95 % CI] |
+|---|---|---|---|---|
+| 4k | 443 | 0.847 | 0.047 | – |
+| 8k | 453 | 0.837 | 0.048 | reference |
+| 16k | 452 | 0.823 | 0.057 | −1.1 [−3.4, +1.2] |
+| 32k | 454 | 0.788 | 0.022 | −5.8 [−9.0, −2.8] |
+| 64k | 452 | 0.781 | 0.035 | −5.2 [−8.2, −2.0] |
+
+ECE at the shipped T = 2.41. Δ is paired on the 445–447 questions asked about the same contracts at both lengths. The 4k bucket holds different contracts and is not a reference for the rule. Source: `runs/r28-readout/context.json` (round 28's registered read-out, `runs/r28-4b-r10-longdoc`).
 
 **Calibration** (expected calibration error, ECE, at the shipped T = 2.41; lower is better):
 
