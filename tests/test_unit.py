@@ -296,7 +296,7 @@ def test_prefix_cache_makes_room_before_the_batch():
                 keys, cached, keep = cache.plan(batch)
                 if room: cache.make_room(keys, cached, keep)
                 cache.store(keys, cached, [old if old is not None else (f"p{step}-{i}" if k else None) for i, (old, k) in enumerate(zip(cached, keep))])
-            assert list(a.entries) == list(b.entries) and (a.hits, a.misses) == (b.hits, b.misses), step
+            assert list(a.entries.items()) == list(b.entries.items()) and (a.hits, a.misses) == (b.hits, b.misses), step
 
 
 def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
@@ -341,6 +341,12 @@ def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
         model.fail = None; s.probs(enc("abc")); model.fail, model.calls = "other", 0
         with pytest.raises(ValueError): s.probs(enc("abc"))
         assert model.calls == 1 and len(s.prefix_cache.entries) == 1
+        # make_room drops the batch's own hit "abc" before the pass (the batch's newer "xyz" takes the only slot), so the
+        # cache is empty when the pass fails, yet the pass holds that hit's state: it still retries, the hit as a miss
+        s.prefix_cache.size, model.fail, model.calls = 1, "cached", 0
+        with s.lock: out = s._run([enc("abc"), enc("xyz")])
+        assert model.calls == 2 and s.prefix_cache.oom_retries == 3 and [o[1]["prefix_cache_hit"] for o in out] == [False, False]
+        assert list(s.prefix_cache.entries) == [(tuple("xyz"), False)]
     finally:
         s.close()
     assert out_of_memory(RuntimeError("MPS backend out of memory (MPS allocated: 1 GB)")) and not out_of_memory(RuntimeError("shape mismatch"))

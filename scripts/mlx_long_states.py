@@ -3,7 +3,9 @@
     uv run --extra serve python scripts/mlx_long_states.py --run jaredpalmer/kev-0.8b --torch-reference 8192,16384 --out runs/mlx-long-states/0.8b.json
     uv run --extra serve python scripts/mlx_long_states.py --run jaredpalmer/kev-4b --out runs/mlx-long-states/4b.json
     uv run python scripts/mlx_long_states.py --summarize runs/mlx-long-states        # the table (summary.md)
-    uv run --extra serve python scripts/mlx_long_states.py --run jaredpalmer/kev-4b --prefill-ab --lengths 8192 --out runs/mlx-long-states/prefill-ab-4b.json
+    uv run --extra serve python scripts/mlx_long_states.py --run jaredpalmer/kev-4b --prefill-ab --lengths 8192,16384 --out runs/mlx-long-states/prefill-ab-4b.json
+    uv run --extra serve python scripts/mlx_long_states.py --run jaredpalmer/kev-0.8b --prefill-ab --precision fp32-cpu --lengths 1500,3000 --hard 1 \
+        --out runs/mlx-long-states/prefill-ab-0.8b-fp32-cpu.json     # chunking is exact: differences are float reassociation
 
 The request is the one runs/kev-deploy-2ea5660/make_long_state.py builds (a one-line billing ticket, then this commit's
 docs/model-cards/*.md repeated in order as filler) with one more sentence planted at 60% depth: an internal note naming
@@ -194,25 +196,65 @@ def torch_reference(ck, tok, records, lengths):
     return out
 
 
-def prefill_ab(ck, lengths, out):
-    """--prefill-ab: the state pass alone (MLXDecisionModel.prefix) on the planted state with PREFILL_CHUNK = one pass,
-    1,024, 2,048 and 4,096 tokens: seconds and MLX peak above the weights, then the answers (max |dp| against one pass)."""
+PRECISIONS = ("bf16", "fp32-gpu", "fp32-cpu")
+
+
+def cache_error(cache, ref, chunk):
+    """A chunked prefix's cache [(attention?, array)] against one pass's: the largest relative error of a whole array
+    (norm) and of one element (against that array's largest value); for the attention keys and values per state position,
+    the median, the largest, and the largest at a pass's first token (where a boundary bug would show), all relative to that
+    position's norm."""
+    import numpy as np
+    whole = max(float(np.linalg.norm(a - b) / max(np.linalg.norm(b), 1e-30)) for (_, a), (_, b) in zip(cache, ref))
+    element = max(float(np.abs(a - b).max() / max(np.abs(b).max(), 1e-30)) for (_, a), (_, b) in zip(cache, ref))
+    norm = lambda x: np.sqrt((x.astype(np.float64) ** 2).sum(axis=(0, 1, 3)))   # [1, heads, positions, dim] -> per position  # noqa: E731
+    per = np.max([norm(a - b) / np.maximum(norm(b), 1e-30) for (att, a), (_, b) in zip(cache, ref) if att], axis=0)
+    starts = per[chunk::chunk] if chunk < len(per) else per[:0]
+    return {"array_rel": whole, "element_rel": element, "kv_position_rel": {"median": float(np.median(per)), "max": float(per.max()), "argmax": int(per.argmax()),
+            "max_at_pass_starts": float(starts.max()) if len(starts) else None}, "identical": all(np.array_equal(a, b) for (_, a), (_, b) in zip(cache, ref))}
+
+
+def prefill_ab(ck, lengths, chunks, precision, hard, out, layers=None):
+    """--prefill-ab: the state pass alone (MLXDecisionModel.prefix) per PREFILL_CHUNK against one pass, on the planted state
+    at each of --lengths and on the `hard` longest hard-v1 long_policy development records (real states, whose lengths are
+    no multiple of a chunk): seconds, MLX peak above the weights, the answers' max |dp| and argmax flips, and the largest
+    difference of the prompt cache (attention keys/values, DeltaNet conv and recurrent states) relative to its largest
+    value (cache_error). --precision fp32-gpu casts the backbone to fp32, fp32-cpu also runs it on the CPU: an exact chunked
+    prefill differs from one pass only by float reassociation, so its differences shrink with the precision (to ~1e-6 on
+    the CPU; Metal's fp32 matmul is a reduced-precision fast path) where a boundary bug (conv window, rotary offset,
+    recurrent state) would not. --layers N keeps the backbone's first N layers (the answers are then meaningless, the
+    cache comparison is not): the 4B's own weights in fp32 fit a 32 GB Mac that way."""
     import mlx.core as mx
+    import numpy as np
     import kev.mlx_model as MM
+    from kev.data import api_request
     from kev.model import admit
-    tok, m = ck.load("mps", LoadOptions(backend="mlx")); mx.clear_cache(); weights = mx.get_active_memory()
-    filler, report = filler_ids(tok, max(lengths) + 1000), {"run": ck.requested, "path": str(ck.path), "machine": machine(), "lengths": {}}
+    from kev.suite import load_split
+    tok, m = ck.load("mps", LoadOptions(backend="mlx")); served = MM.PREFILL_CHUNK
+    if layers: m.text.layers = m.text.layers[:layers]
+    if precision != "bf16": m.lm.set_dtype(mx.float32); mx.eval(m.lm.parameters())
+    if precision == "fp32-cpu": mx.set_default_device(mx.cpu)
+    mx.clear_cache(); weights = mx.get_active_memory()
+    filler = filler_ids(tok, max(lengths + [2048]) + 1000)
+    cases = {f"planted-{n}": to_record(request(build_state(tok, filler, n, "Lisbon"))) for n in lengths}
+    long = sorted((r for r in load_split("evals/hard-v1", "development") if r["_meta"]["family"] == "long_policy"), key=lambda r: -r["_meta"]["state_tokens"])
+    cases.update({r["_meta"]["id"]: to_record(SystemOneRequest.model_validate(api_request(r))) for r in long[:hard]})
+    report = {"run": ck.requested, "path": str(ck.path), "machine": machine(), "precision": precision, "dtype": m.dtype, "device": str(mx.default_device()),
+              "layers": len(m.text.layers), "weights_gb": gb(weights), "cases": {}}
     m.probs(admit(m, tok, to_record(request(build_state(tok, filler, 2048)))[0]))   # warm-up
-    for n in lengths:
-        rec, meta = to_record(request(build_state(tok, filler, n, "Lisbon"))); enc = admit(m, tok, rec); rows = {}; one = None
-        for chunk in (10 ** 9, 1024, 2048, 4096):
+    flat = lambda cache: [(hasattr(c, "offset"), np.asarray(x.astype(mx.float32))) for c in cache for x in c.state]   # noqa: E731
+    for name, (rec, meta) in cases.items():
+        enc = admit(m, tok, rec); n = enc["seg"].count(0); rows = {}
+        for chunk in (10 ** 9, *[c for c in chunks if c < n]):
             MM.PREFILL_CHUNK = chunk; gc.collect(); mx.clear_cache(); mx.reset_peak_memory(); t = time.perf_counter()
             prefix = m.prefix(enc); seconds = time.perf_counter() - t; peak = mx.get_peak_memory() - weights
-            answers = named([p.tolist() for p in m.probs_with_prefix(enc, prefix)], meta); one = one or answers; del prefix
-            rows["one pass" if chunk == 10 ** 9 else chunk] = {"seconds": round(seconds, 2), "peak_above_weights_gb": gb(peak), "vs_one_pass": agreement(answers, one)}
-        report["lengths"][n] = rows; print(n, rows, flush=True)
-    MM.PREFILL_CHUNK = 1024
-    write_json(Path(out), report)
+            answers, cache = named([p.tolist() for p in m.probs_with_prefix(enc, prefix)], meta), flat(prefix[1]); del prefix
+            if chunk == 10 ** 9: one, one_cache = answers, cache
+            rows["one pass" if chunk == 10 ** 9 else str(chunk)] = {"seconds": round(seconds, 2), "peak_above_weights_gb": gb(peak),
+                                                                    "vs_one_pass": agreement(answers, one), "cache": cache_error(cache, one_cache, chunk)}
+        report["cases"][name] = {"state_tokens": n, "chunks": rows}; print(name, n, rows, flush=True)
+        write_json(Path(out), report)
+    MM.PREFILL_CHUNK = served
 
 
 def summarize(folder):
@@ -238,10 +280,12 @@ def summarize(folder):
                         + (f"max \\|dp\\| {ref['max_dp']:.4f}, {len(ref['argmax_flips'])} flips" if ref else "-") + " |")
         notes.append(f"- Kev-{size}: {r['path'].rsplit('/', 1)[-1][:7]}, {r['dtype']}, load {r['load_seconds']} s, admission of a {r['admission']['state_tokens']:,}-token state: {r['admission']['status']}")
     for path in sorted(Path(folder).glob("prefill-ab-*.json")):
-        r = json.loads(path.read_text(encoding="utf-8")); size = r["run"].split("kev-")[-1].upper()
-        for n, x in r["lengths"].items():
-            notes.append(f"- Kev-{size}, the state pass alone at {int(n):,} tokens ({path.name}): one pass {x['one pass']['seconds']} s / {x['one pass']['peak_above_weights_gb']} GB above the weights, "
-                         + ", ".join(f"{c}-token chunks {x[c]['seconds']} s / {x[c]['peak_above_weights_gb']} GB (max |dp| {x[c]['vs_one_pass']['max_dp']})" for c in ("1024", "2048", "4096")))
+        r = json.loads(path.read_text(encoding="utf-8")); size = r["run"].split("kev-")[-1].split("@")[0].upper()
+        for name, x in r["cases"].items():
+            one, rest = x["chunks"]["one pass"], {c: v for c, v in x["chunks"].items() if c != "one pass"}
+            notes.append(f"- Kev-{size} {r['precision']}, {r['layers']} layers, the state pass alone, {name} ({x['state_tokens']:,} tokens, {path.name}): one pass {one['seconds']} s / {one['peak_above_weights_gb']} GB above the weights; "
+                         + ", ".join(f"{c}-token chunks {v['seconds']} s / {v['peak_above_weights_gb']} GB (max |dp| {v['vs_one_pass']['max_dp']:.2g}, cache {v['cache']['array_rel']:.1g}, "
+                                     f"keys/values per position: median {v['cache']['kv_position_rel']['median']:.1g}, max {v['cache']['kv_position_rel']['max']:.1g}, max at pass starts {v['cache']['kv_position_rel']['max_at_pass_starts'] or 0:.1g})" for c, v in rest.items()))
     text = f"MLX long-state serving, {m['chip']} {m['memory_gb']:.0f} GB, macOS {m['macos']}, mlx {m['mlx']} / mlx-lm {m['mlx_lm']} (scripts/mlx_long_states.py)\n\n" + "\n".join(rows) + "\n\n" + "\n".join(notes) + "\n"
     (Path(folder) / "summary.md").write_text(text, encoding="utf-8"); print(text)
 
@@ -254,11 +298,15 @@ def main():
     ap.add_argument("--torch-reference", default="", help="comma-separated lengths to also run on fp32 torch (CPU)")
     ap.add_argument("--out", help="the report to write (runs/mlx-long-states/<size>.json)")
     ap.add_argument("--summarize", metavar="DIR", help="only write DIR/summary.md from the reports in DIR")
-    ap.add_argument("--prefill-ab", action="store_true", help="only time the state pass per PREFILL_CHUNK at --lengths (prefill_ab)")
+    ap.add_argument("--prefill-ab", action="store_true", help="only the state pass per PREFILL_CHUNK at --lengths and on --hard real records, against one pass (prefill_ab)")
+    ap.add_argument("--chunks", default="256,512,1024,2048,4096", help="--prefill-ab: the PREFILL_CHUNK values to compare with one pass")
+    ap.add_argument("--precision", default="bf16", choices=PRECISIONS, help="--prefill-ab: bf16 as served, or the backbone in fp32 on the GPU / on the CPU")
+    ap.add_argument("--layers", type=int, help="--prefill-ab: keep only the backbone's first N layers (the 4B in fp32 on the CPU)")
+    ap.add_argument("--hard", type=int, default=3, help="--prefill-ab: the longest hard-v1 long_policy development records to add (~4.9k tokens each)")
     a = ap.parse_args()
     if a.summarize: return summarize(a.summarize)
     if not a.out: ap.error("--out is required")
-    if a.prefill_ab: return prefill_ab(Checkpoint(a.run), [int(x) for x in a.lengths.split(",")], a.out)
+    if a.prefill_ab: return prefill_ab(Checkpoint(a.run), [int(x) for x in a.lengths.split(",") if x], [int(x) for x in a.chunks.split(",")], a.precision, a.hard, a.out, a.layers)
     lengths = [int(x) for x in a.lengths.split(",")]
     ck = Checkpoint(a.run)
     report = {"run": a.run, "path": str(ck.path), "base": ck.meta.base, "base_revision": ck.meta.base_revision, "machine": machine(),

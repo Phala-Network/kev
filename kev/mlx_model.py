@@ -180,14 +180,17 @@ class MLXDecisionModel:
 
     def prefix(self, enc):
         """The state into a fresh prompt cache, PREFILL_CHUNK tokens per pass, each pass's cache evaluated before the next
-        (mlx-lm's own prefill does the same). One pass over the whole state kept every layer's activations of every token
-        alive at once and left the DeltaNet conv states lazy (each holding its layer's whole [Ls, conv_dim] input): Kev-4B,
-        8,192 tokens, 4.6 GB above the weights instead of 1.2 GB, the same 6.5 s (runs/mlx-long-states)."""
+        (mlx-lm's own prefill does the same; the hidden states a pass returns are never read). One pass over the whole
+        state kept every layer's activations of every token alive at once and left the DeltaNet conv states lazy (each
+        holding its layer's whole [Ls, conv_dim] input): Kev-4B, 8,192 tokens, 4.6 GB above the weights instead of 1.2 GB,
+        the same 6.5 s. Exact: a pass continues the cached keys/values (rotary offset = cache offset), conv window and
+        fp32 recurrent state, so chunked and one-pass differ by float reassociation only (fp32 on the CPU: max |dp| 1e-6;
+        bf16 on Metal: up to ~0.01, like any change of kernel shapes; tests/test_mlx.py, runs/mlx-long-states/prefill-ab-*)."""
         Ls = enc["seg"].count(0)
         cache, ids = make_prompt_cache(self.lm), enc["ids"][:Ls]
         for start in range(0, Ls, PREFILL_CHUNK):
-            h = self.text(mx.array([ids[start:start + PREFILL_CHUNK]], dtype=mx.int32), cache=cache)
-            mx.eval(h, [c.state for c in cache]); del h
+            self.text(mx.array([ids[start:start + PREFILL_CHUNK]], dtype=mx.int32), cache=cache)
+            mx.eval([c.state for c in cache])
         return Ls, cache
 
     def _branch_logits(self, enc, cache):
