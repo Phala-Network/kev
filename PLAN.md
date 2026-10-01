@@ -56,7 +56,7 @@ Kev-27B on the Hub only.
   4b-r10,9b-r27,27b-r23}-ungated`. Everything else on each size's card (`docs/model-cards/`), traced in `docs/claims.json`.
 - Held-out-dataset panels a Kev 2 rule should read against these parents: breadth-v1 dev / test (audited: without `routerbench`,
   `cfcolor`, `humicroedit`, `chessbench`), tasksource-heldout-v1 dev (without the seven private families; 4B 0.677, 0.8B 0.515
-  at shipped T, `runs/r28-readout/round28.json`; 9B pending round 29's read-out; 27B test 0.795), transfer-v4 dev, and the
+  at shipped T, `runs/r28-readout/round28.json`; 9B v2 0.706 at the pool T = its shipped T, `runs/r29-readout/round29.json`; 27B test 0.795), transfer-v4 dev, and the
   locked transfer-v4 test, read once per candidate. The breadth-v1 test and tasksource-heldout-v1 test partitions have been
   read for the 27B (round 23/24) and breadth-v1 test for every size (family reads): a Kev 2 confirmation on them is a second
   read and weaker evidence than a fresh panel.
@@ -165,7 +165,7 @@ Kev-27B on the Hub only.
   −0.0014]) and fails the hard-v1, devtools-v1 and documents-v1 ECE guards (+0.011, +0.007, +0.020 against a tolerance of 0.005).
   The long-state memory wall that blocked phase B is fixed (PR #202). Phase B's longdoc-v1 reads of the released checkpoints
   gave every size its validated context length (report only, `runs/r28-readout/context.json`): 8,192 for Kev-0.8B, 4B and
-  9B v2, 65,536 for Kev-27B v2. Round 29 is not read out (its other arms' phase-B reads were still running). See "Round 28 (registered)" and "Round 29 (registered)".
+  9B v2, 65,536 for Kev-27B v2. **Round 29: no candidate; Kev-9B v2 stands** (`runs/r29-readout/round29.json`; every arm fails the tasksource-heldout-v1 primary, v2 also breadth-v1; ten arms' longdoc reads stopped for the budget, which cannot change the verdict). See "Round 28 (registered)" and "Round 29 (registered)".
 - Decisions waiting on Jared: submit Kev-27B (and the new 4B / 0.8B) to the Decision Index.
 - Spend: Modal metered $4,558.69 at 2026-09-29T13:01Z after round 26's last read (+$104.88 over its launch reading of
   $4,453.81; the 11:17Z reading was $4,650.37, +$196.56, and was revised down by 12:56Z; night ceiling ≈ $5,980, hard stop
@@ -3028,6 +3028,56 @@ the bounds in flight < $270. Order: phase A; round 28's read-out; the memory-fix
 read-out; then confirmation. A 9B agents-ood read may need more than its 1,800 s default (Kev-27B's took about 66 min):
 relaunch it alone with `--timeout 3600` rather than raising the spec's `read_timeout`, which would double every 9B bound.
 
+## Round 29 result (2026-10-01) — no candidate; Kev-9B v2 stands (read out with ten arms' longdoc reads missing)
+
+**Verdict** (`runs/r29-readout/round29.json`, `readout.txt`): **no arm passes**, so there is no candidate, no confirmation is
+read, and Kev-9B v2's release stands as round 27 registered it. The read-out is not complete: phase B's longdoc-v1 reads of
+the ten arms other than `9b-r18a` were stopped at 750-800 of 1,200 records for the budget (below), so the engine marks those
+arms `incomplete`. That cannot change the verdict. Every arm already fails primary 1's tasksource-heldout-v1 condition
+(accuracy lower bound > 0) on reads that are complete, and a missing read can only add failures: an arm passes only if every
+criterion passes.
+
+Against Kev-9B v1 (`jaredpalmer/kev-9b@2629c06a`, shipped T 2.30), each arm at the pool T; accuracy Δ in pp [95 % CI],
+paired record-clustered bootstrap:
+
+| arm | breadth-v1 dev (audited) | tasksource-heldout-v1 dev (audited) | Kev panel | short state | longdoc CUAD | failed criteria |
+|---|---|---|---|---|---|---|
+| `9b-r7-s1` | +0.9 [+0.2, +1.7] | −0.1 [−1.0, +0.9] | +1.2 [+0.4, +2.1] | −1.0 [−2.0, −0.2] | not read | `1_tasksource_heldout_lower_above_0` |
+| `9b-r7-s2` | +0.7 [+0.0, +1.5] | −0.6 [−1.5, +0.4] | +1.9 [+1.1, +2.8] | −0.8 [−1.8, +0.2] | not read | `1_breadth`, `1_tasksource_heldout` |
+| `9b-r9-a` | +1.0 [+0.3, +1.8] | −0.8 [−1.7, +0.2] | +1.7 [+0.8, +2.6] | −0.5 [−1.5, +0.4] | not read | `1_tasksource_heldout` |
+| `9b-r9-b` | +0.5 [−0.1, +1.1] | −0.1 [−1.0, +0.8] | +1.5 [+0.7, +2.3] | −0.1 [−0.9, +0.6] | not read | `1_breadth`, `1_tasksource_heldout` |
+| `9b-r9-c` | +0.6 [−0.0, +1.2] | −0.7 [−1.6, +0.2] | +1.6 [+0.8, +2.4] | −0.5 [−1.4, +0.3] | not read | `1_breadth`, `1_tasksource_heldout` |
+| `9b-r11-s4` | +0.3 [−0.4, +1.0] | −0.5 [−1.4, +0.5] | +1.6 [+0.8, +2.4] | −0.7 [−1.5, +0.0] | not read | `1_breadth`, `1_tasksource_heldout`, `3_kev_ece` |
+| `9b-r11-s5` | +0.4 [−0.2, +1.2] | −0.8 [−1.8, +0.2] | +1.2 [+0.3, +2.1] | −1.1 [−2.1, −0.1] | not read | `1_breadth`, `1_tasksource_heldout`, `2_short_acc`, `3_kev_ece` |
+| `9b-r16-lr1e5` | +0.3 [−0.7, +1.2] | −0.9 [−2.3, +0.5] | +8.7 [+7.4, +10.0] | −0.3 [−1.5, +0.9] | not read | `1_breadth`, `1_tasksource_heldout`, `3_kev_ece` |
+| `9b-r16-lr2e5` | +0.6 [−0.4, +1.5] | −0.7 [−2.1, +0.7] | +9.9 [+8.6, +11.2] | −0.1 [−1.3, +1.1] | not read | `1_breadth`, `1_tasksource_heldout`, `3_kev_ece` |
+| `9b-r18a` (= v2) | +0.2 [−0.8, +1.2] | +0.6 [−0.8, +2.0] | +12.6 [+11.3, +14.1] | +0.1 [−1.1, +1.2] | +2.5 [+0.8, +4.3] | `1_breadth`, `1_tasksource_heldout` |
+| `9b-r18b` | +0.2 [−0.8, +1.2] | −0.3 [−1.6, +1.1] | +10.8 [+9.4, +12.2] | −0.4 [−1.5, +0.8] | not read | `1_breadth`, `1_tasksource_heldout`, `3_kev_ece` |
+
+(`1_breadth` = `1_breadth_lower_above_0`, `1_tasksource_heldout` = `1_tasksource_heldout_lower_above_0`, `2_short_acc` =
+`2_short_acc_lower_at_least_minus_2pp`, `3_kev_ece` = `3_kev_ece_at_most_parent_plus_0.01`.)
+
+- **What it says.** None of the eleven 9B deltas of rounds 7-18 beats Kev-9B v1 on held-out *datasets* by a resolvable
+  margin: the documents-only deltas buy +0.5 to +1.0 pp on breadth-v1 (two of them with a lower bound above 0) and lose
+  0.1-0.9 pp on tasksource-heldout-v1; the skills deltas (16, 18) gain 8.7-12.6 pp on the trained-family Kev panel and nothing
+  measurable on either held-out panel. The audited rule would not have selected v2 either; v2 was selected by round 27's rule
+  (trained-family panels with held-out guards), and it passes every guard and calibration criterion here.
+- **Kev-9B v2 (`9b-r18a`) against v1**, complete: breadth-v1 dev 0.781 vs 0.779, tasksource-heldout-v1 dev 0.706 vs 0.700
+  (ECE 0.032 vs 0.057), Kev panel 0.849 vs 0.723, short state 0.871 both, longdoc-v1 CUAD 0.837 vs 0.811 (+2.5 [+0.8, +4.3];
+  16k+ 0.810 vs 0.792), ood-v2 0.889 vs 0.882. Its CUAD guards pass.
+- Outcome under the registration's "What each outcome means": *No arm passes*. The result is recorded, including v2's
+  own primary failures as information. Nothing is confirmed and no test partition was read.
+
+**Reads and budget.** Phase B ran on H100 (`kev-sweepB`). Read and committed: `r29-P9-longdoc` and `r29-9b-r18a-longdoc`.
+Stopped: the other ten arms' longdoc reads, launched 16:05Z with one job per detached `modal run`. They were stopped at
+18:40Z at 750-800 of 1,200 records, because the workspace read $4,987.19 metered (September $4,682.78 + October) against the
+session's $5,100 stop. Their own remaining ≈ 2.1 h × 10 × $5.675 ≈ $119 would have crossed it with no other spend, and other
+sessions' jobs were adding about $40-90/h. Their partial `predictions.jsonl` stay on the volume. Not launched: agents-ood-v1
+and guardrails-ood-v1 for the parent and all eleven arms (24 reads, ≈ $180 at the 9B rates measured here: agents-ood about
+10 s per record at 4B). Both panels are report only (`optional`), so their absence leaves the comparisons complete. Finishing
+the read-out formally needs the ten longdoc reads (≈ $270 from scratch at about 4.7 h each), and it would not change the
+verdict.
+
 ## Record
 
 One line per round or named study. `rN.json` is `experiments/rounds/rN.json` on main (the rule as data; `python -m
@@ -3073,7 +3123,8 @@ outcomes.
 | WANLI and TypeSafe removed | 09-30 | `evals/external/{wanli-v2, wanli-v1, typesafe-v1}` removed as unsound for a gate (a quarter of WANLI's gold labels are one of two disagreeing annotators'; TypeSafe's gold is two closed frontier models' averaged answer, split-half r about 0) | past verdicts stand; SemIf is the only external read from round 27, report only | "WANLI and TypeSafe removed"; `kev.suite.REMOVED_SUITES` |
 | Round 27 | 09-30 | post-hoc, no training: round 18's two 9B documents + skills deltas on the audited rule at a held-out-pool temperature | **`9b-r18a` confirmed** (both arms pass; tests: pooled +18.7, documents-v1 +7.1; locked transfer-v4 +0.0 [−1.7, +1.8], Brier −0.025); staged as Kev-9B v2, not published | `r27.json`; "Round 27 result"; `runs/r27-readout`, `runs/r27-verdict` |
 | Release: Kev-9B v2 | 09-30 | round 27's `9b-r18a` published to `jaredpalmer/kev-9b` main (`b5d8c18e`, adapter `2b2a70cf…`, T 2.19); v1 tagged `v1` first | **released**; anonymous Hub load reproduces round 18's reads (argmax 252/252, 764/764); `@v1` loads v1 at T 2.30 | "Released: Kev-9B v2"; `runs/rel9-public/` |
-| Round 28 | 09-30 | post-hoc, no training: Kev-4B / Kev-0.8B temperatures refitted on the held-out pool; validated context length per size (report only) | no candidate at either size: `4b-r10` fails both primaries (Brier −0.0001 [−0.0005, +0.0003], ECE 0.0252 vs 0.0240); `08b-r15` passes both and fails the hard / devtools / documents ECE guards; shipped T 2.41 / 2.35 stay; validated context (report only) 8,192 for 0.8B / 4B / 9B v2, 65,536 for 27B v2 | `r28.json`; `runs/r28-readout`; "Round 28 (registered)" |
+| Round 28 | 09-30 | post-hoc, no training: Kev-4B / Kev-0.8B temperatures refitted on the held-out pool; validated context length per size (report only) | no candidate at either size: `4b-r10` fails both primaries (Brier −0.0001 [−0.0005, +0.0003], ECE 0.0252 vs 0.0240); `08b-r15` passes both and fails the hard / devtools / documents ECE guards; shipped T 2.41 / 2.35 stay; validated context (report only) 8,192 for 0.8B / 4B / 9B v2, 65,536 for 27B v2 (re-read 10-01 with every phase-B panel; verdict unchanged) | `r28.json`; `runs/r28-readout` (`context.{json,md}`); "Round 28 result" |
+| Round 29 | 10-01 | post-hoc, no training: the eleven 9B deltas of rounds 7-18 against Kev-9B v1 under round 24's audited rule, pool T | **no candidate**: every arm fails the tasksource-heldout-v1 primary (lower bound > 0), and all but `9b-r7-s1` / `9b-r9-a` also breadth-v1; Kev-9B v2 stands. Ten arms' longdoc reads stopped for the budget (verdict-neutral); agents / guardrails OOD not read | `r29.json`; `runs/r29-readout`; "Round 29 result" |
 | Kev 1.0 (release candidate) | 09-30 | the four released checkpoints versioned as one family: formal cards for all four, README family table, release notes and asset builder; no training, no new read | **staged, not published**: Hub tag `v1.0` (0.8B `9a45d25e`, 4B `139fdd94`, 9B `b5d8c18e`, 27B main) and GitHub release `kev-1.0` planned; validated context 8,192 (0.8B, 4B, 9B) / 65,536 (27B); the baseline Kev 2 is measured against | "Kev 1.0 baseline (release candidate)"; `docs/releases/kev-1.0.md`, `docs/releases/kev-1.0-assets.json` |
 | breadth-v1 | 09-24 | frozen eval-only panel over the Decision Index's five areas (14 held-out datasets, 150 records each, locked test unread); development baselines | report: chance-corrected index Jev 53.3, AutoJev-27B 51.7, Kev-27B 50.2, Kev-4B 40.8 (Kev-27B vs Jev −3.1 [−6.2, +0.1]); Kev-27B trails most on retrieval (SGD, CLINC150) | `evals/breadth-v1/manifest.json`; `runs/breadth-v1-report/report.md` |
 | drift-v1 | 09-30 | why Kev-27B v1's semif-v1 logits differ between its 09-23 read and the 09-30 public read (max \|Δp\| 0.032, argmax equal) | report: #125's causal-conv1d CUDA kernel in the Modal image (replacing transformers' PyTorch conv in the 48 DeltaNet layers); no code drift (09-23 code and `main` bit-identical on the same kernels), no nondeterminism; breadth-v1 offset acc −0.1 pp, ECE +0.0008, 13/3,075 flips, below every round-25/26 margin; fp32 Qwen3.5 reads on CUDA carry fla's TF32 dots (≈ 0.003 in p) | `runs/drift-v1/REPORT.md`; AGENTS.md "What fp32-exact guarantees" |

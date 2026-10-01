@@ -600,6 +600,9 @@ runs/r29-*-agentsood/rows.json
 runs/r28-*-guardood/rows.json
 runs/r29-*-guardood/rows.json
 runs/r28-4b-r10-agentsood-t10800/
+# round 29's read-out (aggregates only; no tasksource-heldout family names)
+!runs/r29-readout/
+!runs/r29-readout/*
 !runs/fam-4b-breadth/rows.json
 !runs/fam-08b-breadth/rows.json
 !runs/fam-9b-breadth/rows.json
