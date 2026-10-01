@@ -44,7 +44,8 @@ def long_row_kernels():
     layer. Inside this context an fp32 call repeats its keys and values per query head instead (transformers' own path
     whenever a mask is given), and the memory-efficient kernel takes that: fp32 inputs and output, memory linear in L.
     On sm80+ its fp32 products are cutlass's OpMultiplyAddFastF32 (three TF32 products per product, fp32 accuracy and
-    fp32 accumulation), not plain TF32. bf16 / fp16 calls keep `enable_gqa` and the flash kernel, so Kev-27B's long rows run as before."""
+    fp32 accumulation), not plain TF32. bf16 / fp16 calls keep `enable_gqa` and the flash kernel, so Kev-27B's long rows
+    run as before."""
     from transformers.integrations import sdpa_attention
     grouped = sdpa_attention.use_gqa_in_sdpa
     sdpa_attention.use_gqa_in_sdpa = lambda attention_mask, key, value: key.dtype != torch.float32 and grouped(attention_mask, key, value)
