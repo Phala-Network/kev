@@ -2417,7 +2417,7 @@ def test_release_assets_are_deterministic_and_refuse_placeholders_and_wrong_hash
     payload = b"adapter bytes"
     asset = {"name": "kev-x", "repo": "r/kev-x", "revision": "abc", "card": "docs/card.md", "locked": "runs/locked.json",
              "expect": {"adapter_model.safetensors": hashlib.sha256(payload).hexdigest()}}
-    assert card_problems((root / "docs/card.md").read_text()) == ["{{VALIDATED_CONTEXT_4B}}"]
+    assert card_problems((root / "docs/card.md").read_text(encoding="utf-8")) == ["{{VALIDATED_CONTEXT_4B}}"]
     assert check_asset(asset, root) == ["kev-x: card docs/card.md still has {{VALIDATED_CONTEXT_4B}}"]
     (root / "docs/card.md").write_text("Validated context: 16,384 tokens\n", encoding="utf-8")
     assert check_asset(asset, root) == []
@@ -2433,7 +2433,7 @@ def test_release_assets_are_deterministic_and_refuse_placeholders_and_wrong_hash
         stage(asset, tmp_path / "w0", root, download(b"tampered"))
     staged = stage(asset, tmp_path / "w1", root, download(payload))
     assert sorted(p.name for p in staged.iterdir()) == ["README.md", "adapter_model.safetensors", "head.pt", "locked_test.json"]
-    assert (staged / "README.md").read_text() == "Validated context: 16,384 tokens\n"
+    assert (staged / "README.md").read_text(encoding="utf-8") == "Validated context: 16,384 tokens\n"
     first = deterministic_tar(staged, tmp_path / "a.tar.gz")
     os.utime(staged / "head.pt", (1, 1))
     again = stage(asset, tmp_path / "w2", root, download(payload))
@@ -2442,4 +2442,4 @@ def test_release_assets_are_deterministic_and_refuse_placeholders_and_wrong_hash
         assert tar.getnames() == ["kev-x", "kev-x/README.md", "kev-x/adapter_model.safetensors", "kev-x/head.pt", "kev-x/locked_test.json"]
         assert {m.mtime for m in tar.getmembers()} == {0}
     sums = write_sums({"b.tar.gz": "2" * 64, "a.tar.gz": first}, tmp_path)
-    assert sums.read_text() == f"{first}  a.tar.gz\n{'2' * 64}  b.tar.gz\n"
+    assert sums.read_text(encoding="utf-8") == f"{first}  a.tar.gz\n{'2' * 64}  b.tar.gz\n"
