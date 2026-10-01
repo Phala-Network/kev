@@ -2857,6 +2857,54 @@ Existing reads it uses: breadth-v1 dev `runs/fam-{4b,08b}-breadth`; hard-v1 / de
 and the two locked reads. The fam-* rows are on the volume only (`modal volume get kev-runs /bench/fam-4b-breadth runs/`); the
 rest are in the research checkout. The budget is shared with round 29, below.
 
+## Round 28 result (2026-10-01) — no candidate at either size; validated context 8,192 (0.8B, 4B, 9B v2) and 65,536 (27B v2)
+
+**Verdict** (`runs/r28-readout/round28.json`, re-read with every phase-B panel present; unchanged from phase A's read-out in
+PR #203): no candidate. Kev-4B keeps T 2.41 and Kev-0.8B T 2.35.
+- `4b-r10` (pool T 2.297 [2.047, 2.520]) fails both primary conditions: Brier −0.0001 [−0.0005, +0.0003], ECE 0.0252
+  against 0.0240.
+- `08b-r15` (pool T 2.520 [2.194, 2.828]) passes both (ECE 0.0375 against 0.0484, Brier −0.0020 [−0.0025, −0.0014]) and fails
+  the hard-v1, devtools-v1 and documents-v1 ECE guards (+0.011, +0.007, +0.020 against a tolerance of 0.005).
+
+**Report-only phase-B panels** (pool T minus shipped T, ECE; accuracy identical by construction):
+
+| panel | `4b-r10` ECE pool / shipped, Δ [95 % CI] | `08b-r15` ECE pool / shipped, Δ [95 % CI] |
+|---|---|---|
+| longdoc-v1 CUAD (2,254 q) | 0.023 / 0.031, −0.008 [−0.012, +0.004] | 0.061 / 0.053, +0.008 [−0.006, +0.016] |
+| longdoc-v1 generated (2,400 q) | 0.090 / 0.100, −0.010 [−0.011, −0.009] | 0.143 / 0.131, +0.012 [+0.011, +0.012] |
+| agents-ood-v1 (2,084 q) | 0.193 / 0.203, −0.010 [−0.010, −0.010] | 0.103 / 0.097, +0.006 [+0.001, +0.013] |
+| guardrails-ood-v1 (4,949 q) | 0.042 / 0.051, −0.009 [−0.013, −0.004] | 0.051 / 0.063, −0.011 [−0.012, −0.007] |
+
+The pool T would have helped Kev-4B a little on every long and OOD panel and moved Kev-0.8B both ways; neither changes the
+verdict, which the rule fixed on the gating panels. Kev-4B's agents-ood-v1 ECE (0.20) is the worst calibration of any
+panel it was read on.
+
+**Validated context length** (report only; `runs/r28-readout/context.{json,md}`, from `runs/r28-context/report.json`, the
+registered `scripts/longdoc_report.py --context-margin -0.03` command plus Kev-27B v2's round-23 read, and
+`runs/r28-context-served` for ECE at the shipped T). CUAD accuracy difference from the 8k bucket, paired on 445-447
+questions, pp [95 % CI]:
+
+| size | read | 16k | 32k | 64k | validated |
+|---|---|---|---|---|---|
+| Kev-0.8B | `r28-08b-r15-longdoc` | −5.2 [−8.5, −2.1] | −6.0 [−9.5, −2.5] | −7.9 [−11.8, −4.2] | **8,192** |
+| Kev-4B | `r28-4b-r10-longdoc` | −1.1 [−3.4, +1.2] | −5.8 [−9.0, −2.8] | −5.2 [−8.2, −2.0] | **8,192** |
+| Kev-9B v2 | `r29-9b-r18a-longdoc` | −1.4 [−3.7, +0.9] | −3.6 [−6.4, −0.9] | −5.2 [−7.9, −2.5] | **8,192** |
+| Kev-27B v2 | `r23-27b-k-w85-longdoc` | +0.2 [−0.7, +1.2] | −0.2 [−1.2, +0.7] | −1.1 [−2.4, +0.0] | **65,536** |
+
+- Kev-4B and Kev-9B v2 miss the 16k tolerance by 0.4 and 0.7 pp on the lower bound, with point estimates near −1 pp. The
+  registration predicted wider intervals for the small models and a rule that errs toward 8,192, and that is what happened.
+  At 32k all three small models are measurably below 8k (every upper bound < 0), so a longer claim would not have survived
+  a looser margin either.
+- Kev-0.8B already loses 6.8 pp from 4k to 8k (0.779 → 0.711; unpaired, different contracts), inside its trained length.
+- The values are on the Kev 1.0 cards, README and release notes (PR #206, merged).
+
+**Reads** (phase B, H100, `kev-sweepB`): `r28-{4b-r10,08b-r15}-{longdoc,agentsood,guardood}`. `r28-4b-r10-agentsood` was
+lost in wave 1 (its command spawned two jobs, and a detached `modal run` keeps only the last one alive once the local client
+goes; the volume kept a partial `predictions.jsonl`) and was re-read alone at a 10,800 s timeout as
+`/bench/r28-4b-r10-agentsood-t10800` (373/373 records, 61 min), copied to `runs/r28-4b-r10-agentsood`. The wave-1 partial
+stays on the volume. Rows of the agents-ood and guardrails-ood reads are private (held-out records of sft-v2's components);
+their reports are here.
+
 ## Round 29 (registered)
 
 ### Round 29 - retrospective selection among every 9B delta of rounds 7, 9, 11, 16 and 18 under round 24's audited rule (post hoc, no training; registered with this spec's commit, before any round-29 read)
