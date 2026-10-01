@@ -43,7 +43,8 @@ def long_row_kernels():
     back to math, whose L x L scores do not fit: Kev-4B has 16 heads, so at 32k that is 16 x 32k^2 x 4 B = 69 GB per
     layer. Inside this context an fp32 call repeats its keys and values per query head instead (transformers' own path
     whenever a mask is given), and the memory-efficient kernel takes that: fp32 inputs and output, memory linear in L.
-    bf16 / fp16 calls keep `enable_gqa` and the flash kernel, so Kev-27B's long rows run as before."""
+    On sm80+ its fp32 products are cutlass's OpMultiplyAddFastF32 (three TF32 products per product, fp32 accuracy and
+    fp32 accumulation), not plain TF32. bf16 / fp16 calls keep `enable_gqa` and the flash kernel, so Kev-27B's long rows run as before."""
     from transformers.integrations import sdpa_attention
     grouped = sdpa_attention.use_gqa_in_sdpa
     sdpa_attention.use_gqa_in_sdpa = lambda attention_mask, key, value: key.dtype != torch.float32 and grouped(attention_mask, key, value)

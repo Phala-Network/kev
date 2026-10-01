@@ -1216,11 +1216,11 @@ def test_local_predictor_scores_long_rows_through_the_shared_prefix(tiny_base, t
     monkeypatch.setattr(predictor, "device", "cuda"); monkeypatch.setattr(P, "sync", lambda device: None)   # the CUDA policy, on CPU tensors
     report, scored = evaluate_records([record], predictor, tmp_path / "long")
     assert entered == [True] and shared == [True, True, True] and [r["kernels"] for r in scored] == [P.LONG_ROW_KERNELS] * 2
-    monkeypatch.setattr(P, "ROW_PASS_TOKENS", ROW_PASS_TOKENS)
-    evaluate_records([record], predictor, tmp_path / "short-cuda")
-    assert entered == [True]   # a record under the threshold never enters them, on CUDA either
     assert report["long_rows"] == {"count": 2, "records": 1, "kernels": [P.LONG_ROW_KERNELS], "threshold": ROW_PASS_TOKENS}
     assert [x for r in scored for x in r["logits"]] == pytest.approx([x for z in rows["logits"].values() for x in z.values()], abs=1e-5)
+    monkeypatch.setattr(P, "ROW_PASS_TOKENS", ROW_PASS_TOKENS)
+    short_report, short_rows = evaluate_records([record], predictor, tmp_path / "short-cuda")
+    assert entered == [True] and "long_rows" not in short_report and not any("kernels" in r for r in short_rows)   # under the threshold on CUDA: neither
 
 
 def test_long_row_kernels_repeat_fp32_keys_instead_of_grouped_attention(monkeypatch):
