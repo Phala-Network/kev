@@ -92,7 +92,7 @@ def delimiters(tok):
     tokens are all in its vocabulary (SPECIAL for the Qwen bases; the test tokenizers carry SPECIAL too)."""
     if (cached := getattr(tok, "_kev_delimiters", None)) is None:
         for cached in DELIMITER_SETS:
-            if all(tok.convert_tokens_to_ids(t) not in (None, tok.unk_token_id) for t in cached): break
+            if all(tok.convert_tokens_to_ids(t) not in (None, getattr(tok, "unk_token_id", None)) for t in cached): break
         else: raise ValueError(f"tokenizer has none of the delimiter sets {DELIMITER_SETS}")
         tok._kev_delimiters = cached
     return cached
@@ -105,7 +105,7 @@ def _escape_re(tok):
     """Pattern of this tokenizer's special tokens that `<|name|>` does not cover (Gemma's `<bos>`, `<image|>`, ...),
     longest first; None when there are none (the Qwen tokenizers: user_tokens is then exactly the `<|name|>` rewrite)."""
     if not hasattr(tok, "_kev_escape_re"):
-        rest = sorted({t for t in tok.all_special_tokens if not _SPECIAL_RE.fullmatch(t)}, key=len, reverse=True)
+        rest = sorted({t for t in getattr(tok, "all_special_tokens", ()) if not _SPECIAL_RE.fullmatch(t)}, key=len, reverse=True)
         tok._kev_escape_re = re.compile("|".join(map(re.escape, rest))) if rest else None
     return tok._kev_escape_re
 

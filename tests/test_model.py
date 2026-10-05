@@ -468,7 +468,7 @@ def test_gemma4_12b_packed_matches_rows_and_prefix():
     GPU-only (48 GB of fp32 weights): `modal run modal_app.py::gpu_tests --tests tests/test_model.py::test_gemma4_12b_packed_matches_rows_and_prefix --gpu H200`."""
     import torch
     from kev.data import materialize
-    from kev.model import DELIMITER_SETS, DecisionModel, delimiters, load_tokenizer
+    from kev.model import DELIMITER_SETS, DecisionModel, delimiters, load_tokenizer, MAX_TRAIN_STATE, training_context
     from kev.suite import load_split
     if not torch.cuda.is_available(): pytest.skip("needs CUDA (48 GB of fp32 weights)")
     base, revision = GEMMA_12B
@@ -479,9 +479,9 @@ def test_gemma4_12b_packed_matches_rows_and_prefix():
     recs = [materialize(r) for r in load_split("evals/v7/decision-v7", "development")[:4]]
     filler = " ".join(f"note {i}: nothing relevant here." for i in range(260))   # ~1.3k tokens: branch tokens see only part of this state in sliding layers
     recs.append({**recs[0], "state": filler + "\n\n" + recs[0]["state"]})
-    worst = 0.0
+    worst, ctx = 0.0, training_context(MAX_TRAIN_STATE)
     for rec in recs:
-        enc = m.encode(tok, rec, max_state=2048, max_branch=3072)
+        enc = m.encode(tok, rec, max_state=ctx["max_state"], max_branch=ctx["max_branch"])
         assert enc["ids"][0] == tok.bos_token_id
         with torch.no_grad():
             packed = torch.cat([torch.softmax(z, -1) for z in m._readout(m.hidden(enc), enc)]).cpu()
