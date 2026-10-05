@@ -29,7 +29,9 @@ Spec (paths are relative to the repo root; templates take {round}, {arm}, {size}
     reads     {tag: {suite, flags?} | {entrypoint: "locked_test", decision}}  what each read tag scores (entrypoint: ENTRYPOINTS)
     read_timeout {size: seconds}      overrides modal_app.READ_TIMEOUTS for one size (a 27B's fp32 reads)
     locked_args  {size: [args]}       extra modal_app.py::locked_test switches for one size (a 27B's GPU memory)
-    parents   {name: {trial, checkpoint?, reads: {tag: dir}}}   checkpoint (Hub id[@rev]) only when /<trial>/checkpoint is not on the volume
+    parents   {name: {trial, checkpoint?, reads: {tag: dir}, pooled?, transfer_read?}}   checkpoint (Hub id[@rev]) only when /<trial>/checkpoint is not on the volume;
+                                      pooled: true serves a parent without development rows (a blend) at the round's `temperature`
+                                      pool over its own reads, as arms are; transfer_read names its read standing in for "transfer"
     arms      {name: {trial?, checkpoint?, parent, reads?, select?, transfer_read?, trained_on?}}   name = "<size>-<label>"; reads
                                       default to arm_reads; select false = reported, never the candidate (attribution arms); an
                                       arm without a trial (an interpolated checkpoint) names its /runs/... checkpoint, needs the
@@ -341,8 +343,13 @@ def arm_side(spec, arm, root=ROOT, stage=None):
 def parent_side(spec, arm, root=ROOT, stage=None):
     p = spec["parents"][spec["arms"][arm]["parent"]]
     where = (spec["confirm"][stage].get("parent_reads") if stage else None) or p["reads"]
-    dirs = {**locations(where, spec, arm=arm, size=size_of(arm)), TRANSFER: f"{p['trial']}/transfer"}
-    return Side(p["trial"], dirs, root, spec.get("drop_ids", ()), suite=trial_suite(spec, p["trial"], root), shipped=lambda: shipped_temperature(p, root))
+    transfer = p["reads"][p["transfer_read"]] if p.get("transfer_read") else f"{p['trial']}/transfer"
+    dirs = {**locations(where, spec, arm=arm, size=size_of(arm)), TRANSFER: transfer}
+    pool = None
+    if p.get("pooled"):   # a parent without a trial (a blend, Kev-27B v2) is served as its round served it: on the round's pool, over its own reads
+        registered, fit = spec["temperature"], {**p["reads"], TRANSFER: transfer}
+        pool = Pool([fit[r] for r in registered["reads"]], {fit[r]: s for r, s in registered.get("sources", {}).items()}, [fit[r] for r in registered.get("exclude_reads", [])], registered.get("ci"))
+    return Side(p.get("trial"), dirs, root, spec.get("drop_ids", ()), pool, suite=None if pool else trial_suite(spec, p["trial"], root), shipped=lambda: shipped_temperature(p, root))
 
 
 def rule_tags(rule):
@@ -429,7 +436,7 @@ def validate(spec, root=ROOT, rows=True, plans=True, partitions=False):
             if isinstance(entry.get("path"), str) and not exclude_file_path(entry, root).exists():
                 absent(f"{where} panel {pname}: exclude_file {entry['path']} not in this checkout (a private list: scripts/private_rows.py restore)")
         for pname, p in spec["parents"].items():
-            if not (root / p["trial"] / "development/rows.json").exists(): absent(f"parent {pname}: {p['trial']}/development/rows.json not in this checkout")
+            if not p.get("pooled") and not (root / p["trial"] / "development/rows.json").exists(): absent(f"parent {pname}: {p['trial']}/development/rows.json not in this checkout")
         for arm in spec["arms"]:
             side = parent_side(spec, arm, root)
             required = {t for panel in spec["rule"]["panels"].values() if not panel.get("optional") for t in panel["reads"]}   # an optional panel's reads may be absent
@@ -748,6 +755,7 @@ def calibration_warnings(spec, root=ROOT):
             out.append(f"arm {arm} will be served at a temperature fitted on its trial's {suite} development rows, a training corpus, and "
                        f"{_listed(moved)} criteria depend on it: {ROUND_19}; register a `temperature` pool")
     for name, p in spec["parents"].items():
+        if p.get("pooled"): continue   # served on the round's pool, not on its trial's development rows
         suite = trial_suite(spec, p["trial"], root)
         if not (suite and trainable_sources(suite_manifest(suite) or {}) and (Path(root) / p["trial"] / "development/rows.json").exists()): continue
         shipped = shipped_temperature(p, root)

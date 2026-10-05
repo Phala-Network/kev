@@ -2939,6 +2939,35 @@ the bounds in flight < $270. Order: phase A; round 28's read-out; the memory-fix
 read-out; then confirmation. A 9B agents-ood read may need more than its 1,800 s default (Kev-27B's took about 66 min):
 relaunch it alone with `--timeout 3600` rather than raising the spec's `read_timeout`, which would double every 9B bound.
 
+## Round 30 - Gemma 4 31B IT under round 24's rule (registered 2026-10-05)
+
+**Question.** Does Gemma 4 31B IT (`google/gemma-4-31B-it@842da379`, dense, attention-only with sliding-window layers) close
+the gap to Kev-27B v2 when it gets v2's training rather than the one-epoch v7 LoRA recipe? The report-only reads above have
+the one-epoch LoRA trials level with v1 and below v2 on hard-v1 (−16 pp), devtools (−7), docs (−4) and tasksource-heldout (−3).
+
+**Arms** (`experiments/rounds/r30.json`, parent `31b` = Kev-27B v2, `runs/release/kev-27b-r23`, its round-23 reads
+`runs/r23-27b-k-w85-*`, served as round 23 served it: on the round's pool over its own r3cal/v9 reads, `pooled: true`, a
+new parent option in `kev.rounds` with a test):
+- (a) `r30-g31-full`: round 22's full-weight recipe from the base (`experiments/round30/full-lr2e6.json`: `--full_ft 1`,
+  bf16, lr 2e-6, head lr 1e-4, batch 8 × accum 2 on 8 ranks, `sft-v2-r26`), `H200:8`, 4 h timeout; candidates the final
+  checkpoint and the 25/50/75% snapshots (`31b-full-s25/s50/s75`; their step paths are round 26's step counts as
+  placeholders and are corrected from the trial's plan before any read). Two departures, both forced by the base:
+  `--max_state 8192` (not 32,768) and no `--shared_prefix` / `--pass_tokens_max` (hybrid-only: Gemma trains on the packed
+  mask). A fit check runs first on `H200:8` (`runs/sft-probe/r30-fit-g31-8xh200`, `--state_tokens 2048,4096,8192`, fallbacks
+  batch 4 / 2); if 8192 does not fit at any batch, (a) is not launched and that is the result.
+- (b) `r30-g31-lora2`: the one-epoch Gemma LoRA recipe (`experiments/gemma4-31b-it.json`) at two epochs, seeds 0 and 1
+  (`experiments/round30/lora-2ep.json`, decision-v7), `H200`, 8 h timeout. Round 6's follow-up found two epochs no better
+  at 27B on Qwen; this asks it again on a new base whose one-epoch trials are below v2.
+
+**Rule.** Round 24's audited rule and confirmation verbatim (breadth-v1 and the Kev panel primaries; tasksource-heldout
+guard with `runs/r24-private/tsheld-exclude.json`; short-state and CUAD long-document guards; calibration criteria; no
+pooled-externals guard; SemIf report only). The wanli-v2 / typesafe-v1 report-only reads are dropped (removed suites).
+Confirmation stages are not run in this round without Jared.
+
+**Budget.** $1,200 including reads (Jared, 2026-10-05); metered baseline $365.65 at 19:40 UTC. Admission bounds: fit check
+$41.17, (a) $494.00 (H200:8 × 4 h × 3 attempts), (b) $100.24 (H200 × 8 h × 2 trials). Reads are spend-gated before each
+batch: launch only while (metered − baseline) + running bounds < $1,080 (10% reserve).
+
 ## Gemma 4 31B, report only (2026-10-05)
 
 Development reads of the two `runs/gemma4-31b-it-2` trials (google/gemma-4-31B-it@842da37, v7 recipe, LoRA r16, one epoch, lr 5e-5; seeds 0 and 1), one `::benchmarks` call per trial, results in `runs/g31it-s{0,1}-<suite>` (transfer-v4 dev is the trial's own transfer read). Each Gemma trial is served at the temperature fitted on its own development rows (s0 1.782, s1 1.447); Kev-27B v1 (`runs/r6-27b-v2/01-trial-1`) at its fitted 1.382; Kev-27B v2 (`runs/release/kev-27b-r23*`, reads `runs/r23-27b-k-w85-*`) at round 23's registered pool temperature 1.32. Panel exclusions as round 24's rule (breadth: routerbench, cfcolor, humicroedit, chessbench; devtools: flakeflagger, commitpackft_type; transfer: emotion; the two codereviewer drops). Deltas are Gemma minus reference, accuracy in pp, `kev.metrics.paired_bootstrap` (micro, record-clustered, 2000 resamples, seed 0), on the records both sides scored. No test partition was read. Not a round: nothing here selects or ships a model.
