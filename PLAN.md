@@ -2939,6 +2939,27 @@ the bounds in flight < $270. Order: phase A; round 28's read-out; the memory-fix
 read-out; then confirmation. A 9B agents-ood read may need more than its 1,800 s default (Kev-27B's took about 66 min):
 relaunch it alone with `--timeout 3600` rather than raising the spec's `read_timeout`, which would double every 9B bound.
 
+## Gemma 4 31B, report only (2026-10-05)
+
+Development reads of the two `runs/gemma4-31b-it-2` trials (google/gemma-4-31B-it@842da37, v7 recipe, LoRA r16, one epoch, lr 5e-5; seeds 0 and 1), one `::benchmarks` call per trial, results in `runs/g31it-s{0,1}-<suite>` (transfer-v4 dev is the trial's own transfer read). Each Gemma trial is served at the temperature fitted on its own development rows (s0 1.782, s1 1.447); Kev-27B v1 (`runs/r6-27b-v2/01-trial-1`) at its fitted 1.382; Kev-27B v2 (`runs/release/kev-27b-r23*`, reads `runs/r23-27b-k-w85-*`) at round 23's registered pool temperature 1.32. Panel exclusions as round 24's rule (breadth: routerbench, cfcolor, humicroedit, chessbench; devtools: flakeflagger, commitpackft_type; transfer: emotion; the two codereviewer drops). Deltas are Gemma minus reference, accuracy in pp, `kev.metrics.paired_bootstrap` (micro, record-clustered, 2000 resamples, seed 0), on the records both sides scored. No test partition was read. Not a round: nothing here selects or ships a model.
+
+| suite | n | Gemma s0 acc / Brier / ECE | Gemma s1 acc / Brier / ECE | v1 acc / Brier / ECE | v2 acc / Brier / ECE | s0 − v1 | s1 − v1 | s0 − v2 | s1 − v2 |
+|---|---|---|---|---|---|---|---|---|---|
+| transfer-v4 dev | 576 | 0.894 / 0.169 / 0.034 | 0.891 / 0.164 / 0.022 | 0.884 / 0.184 / 0.038 | 0.887 / 0.171 / 0.035 | +1.0 [-1.6, +4.0] | +0.7 [-1.6, +3.0] | +0.7 [-1.7, +3.3] | +0.3 [-1.9, +2.6] |
+| transfer-v9 | 1046 | 0.824 / 0.256 / 0.041 | 0.826 / 0.252 / 0.031 | 0.822 / 0.265 / 0.050 | 0.820 / 0.252 / 0.036 | +0.2 [-1.8, +2.2] | +0.4 [-1.5, +2.2] | +0.4 [-1.8, +2.5] | +0.6 [-1.3, +2.5] |
+| hard-v1 | 1083 | 0.752 / 0.328 / 0.017 | 0.762 / 0.323 / 0.017 | 0.733 / 0.338 / 0.047 | 0.912 / 0.120 / 0.033 | +1.8 [-0.8, +4.4] | +2.9 [+0.3, +5.3] | -16.1 [-18.7, -13.4] | -15.1 [-17.8, -12.4] |
+| devtools-v1 | 772 | 0.750 / 0.343 / 0.077 | 0.741 / 0.332 / 0.077 | 0.781 / 0.293 / 0.031 | 0.816 / 0.260 / 0.039 | -3.1 [-4.9, -1.4] | -4.0 [-5.9, -2.3] | -6.6 [-8.9, -4.2] | -7.5 [-9.9, -5.1] |
+| documents-v1 | 920 | 0.883 / 0.183 / 0.083 | 0.874 / 0.185 / 0.070 | 0.862 / 0.201 / 0.088 | 0.916 / 0.120 / 0.019 | +2.1 [+0.0, +4.0] | +1.2 [-1.0, +3.2] | -3.4 [-5.3, -1.5] | -4.2 [-6.3, -2.2] |
+| breadth-v1 | 2475 | 0.825 / 0.242 / 0.017 | 0.829 / 0.239 / 0.016 | 0.820 / 0.245 / 0.008 | 0.836 / 0.223 / 0.010 | +0.5 [-0.5, +1.7] | +0.8 [-0.2, +2.0] | -1.0 [-2.1, +0.2] | -0.7 [-1.8, +0.5] |
+| tasksource-heldout-v1 (round 24's seven families excluded) | 1993 | 0.758 / 0.347 / 0.038 | 0.755 / 0.347 / 0.035 | 0.748 / 0.353 / 0.042 | 0.790 / 0.302 / 0.043 | +1.0 [-0.8, +2.9] | +0.7 [-1.1, +2.5] | -3.2 [-5.0, -1.4] | -3.5 [-5.3, -1.8] |
+| SemIf (report only) | 144 | 0.931 / 0.115 / 0.042 | 0.931 / 0.089 / 0.051 | 0.972 / 0.061 / 0.068 | 0.965 / 0.063 / 0.061 | -4.2 [-9.0, +0.0] | -4.2 [-8.3, -0.7] | -3.5 [-8.3, +0.7] | -3.5 [-8.3, +0.7] |
+
+Chance-corrected breadth index (`scripts/breadth_report.py`, all 14 datasets, raw rows, paired record bootstrap, 2000 resamples; `runs/g31-breadth-index*`): v1 50.2 [47.4, 53.3], v2 52.0 [49.4, 54.9], Gemma s0 52.4 [49.5, 55.4], s1 52.5 [49.6, 55.4]. Gemma − v1: +2.1 [−0.6, +4.7] / +2.3 [−0.6, +5.1]; Gemma − v2: +0.3 [−2.5, +3.2] / +0.5 [−2.6, +3.6]. Its gain over v1 comes from the arts and routerbench datasets that round 24's breadth guard excludes; on the audited panel it is +0.5 / +0.8 pp over v1 and −1.0 / −0.7 pp under v2 (table).
+
+Reading (two seeds agree on every sign). Against v1 a one-epoch LoRA on Gemma 4 31B IT is level or better on transfer-v4, v9, hard-v1, docs and breadth (hard s1 +2.9 [+0.3, +5.3]), and worse on devtools-v1 (−3.1 / −4.0, both intervals exclude zero). Against v2 it is level on transfer-v4, v9 and breadth and clearly worse where v2's full-weight SFT data taught the task: hard-v1 −16.1 / −15.1, devtools −6.6 / −7.5, docs −3.4 / −4.2, tasksource-heldout −3.2 / −3.5. Gemma's calibration is worse off its fitting distribution (devtools and docs ECE 0.07–0.08 against v2's 0.04 / 0.02). SemIf is report only: −4.2 / −4.2 vs v1, −3.5 / −3.5 vs v2 on 144 questions. tasksource-heldout is read with round 24's private exclusion list (`runs/r24-private/tsheld-exclude.json`, sha256 `a72030ab…`, restored from kev-private-train): level with v1 (+1.0 / +0.7) and below v2 (−3.2 / −3.5); v1's and v2's reads are `runs/r21-P27-tsheld` and `runs/r23-27b-k-w85-tsheld`.
+
+So the base is competitive with v1 at LoRA strength, and the gap to v2 is the SFT data, not the base: the question for round 30 is whether v2's full-weight recipe closes it on Gemma.
+
 ## Record
 
 One line per round or named study. `rN.json` is `experiments/rounds/rN.json` on main (the rule as data; `python -m
