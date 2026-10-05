@@ -19,6 +19,14 @@
    "gpu": "H200",
    "timeout": 28800,
    "budget": 101
+  },
+  "r30-g31-lora2b": {
+   "plan": "experiments/round30/lora-2ep-s1.json",
+   "suite": "evals/v7/decision-v7",
+   "transfer": "evals/v4/transfer-v4",
+   "gpu": "H200",
+   "timeout": 28800,
+   "budget": 51
   }
  },
  "reads": {
@@ -206,7 +214,7 @@
    ]
   },
   "31b-lora2-s1": {
-   "trial": "runs/r30-g31-lora2/01-trial-1",
+   "trial": "runs/r30-g31-lora2b/00-trial-0",
    "parent": "31b",
    "trained_on": [
     "evals/v7/decision-v7"

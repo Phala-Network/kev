@@ -2961,6 +2961,9 @@ new parent option in `kev.rounds` with a test):
 - (b) `r30-g31-lora2`: the one-epoch Gemma LoRA recipe (`experiments/gemma4-31b-it.json`) at two epochs, seeds 0 and 1
   (`experiments/round30/lora-2ep.json`, decision-v7), `H200`, 8 h timeout. Round 6's follow-up found two epochs no better
   at 27B on Qwen; this asks it again on a new base whose one-epoch trials are below v2.
+  Seed 1 lost its worker at step 1440/3128 (Modal "worker disappeared", 2026-10-05 23:02 UTC; the retry refused the
+  existing trial directory, and a LoRA trial has no resume point). It is rerun unchanged, before any read, as study
+  `r30-g31-lora2b` (`experiments/round30/lora-2ep-s1.json`, bound $51); arm `31b-lora2-s1` points at it.
 
 **Rule.** Round 24's audited rule and confirmation verbatim (breadth-v1 and the Kev panel primaries; tasksource-heldout
 guard with `runs/r24-private/tsheld-exclude.json`; short-state and CUAD long-document guards; calibration criteria; no
