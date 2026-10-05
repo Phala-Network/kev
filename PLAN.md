@@ -2949,12 +2949,15 @@ the one-epoch LoRA trials level with v1 and below v2 on hard-v1 (−16 pp), devt
 `runs/r23-27b-k-w85-*`, served as round 23 served it: on the round's pool over its own r3cal/v9 reads, `pooled: true`, a
 new parent option in `kev.rounds` with a test):
 - (a) `r30-g31-full`: round 22's full-weight recipe from the base (`experiments/round30/full-lr2e6.json`: `--full_ft 1`,
-  bf16, lr 2e-6, head lr 1e-4, batch 8 × accum 2 on 8 ranks, `sft-v2-r26`), `H200:8`, 4 h timeout; candidates the final
+  bf16, lr 2e-6, head lr 1e-4, batch 8 × accum 2 on 8 ranks (4 × 4 after the fit check), `sft-v2-r26`), `H200:8`, 4 h timeout; candidates the final
   checkpoint and the 25/50/75% snapshots (`31b-full-s25/s50/s75`; their step paths are round 26's step counts as
   placeholders and are corrected from the trial's plan before any read). Two departures, both forced by the base:
   `--max_state 8192` (not 32,768) and no `--shared_prefix` / `--pass_tokens_max` (hybrid-only: Gemma trains on the packed
   mask). A fit check runs first on `H200:8` (`runs/sft-probe/r30-fit-g31-8xh200`, `--state_tokens 2048,4096,8192`, fallbacks
   batch 4 / 2); if 8192 does not fit at any batch, (a) is not launched and that is the result.
+  Fit check result (2026-10-05): 2048 fits at batch 8 (98 GB/GPU), 4096 at batch 8 (123 GB), 8192 out of memory at
+  batch 8 and fits at the registered fallback batch 4 × accum 4 (121 GB/GPU, same 128 records/step); (a) runs at
+  batch 4 × accum 4. Report `runs/sft-probe/r30-fit-g31-8xh200`.
 - (b) `r30-g31-lora2`: the one-epoch Gemma LoRA recipe (`experiments/gemma4-31b-it.json`) at two epochs, seeds 0 and 1
   (`experiments/round30/lora-2ep.json`, decision-v7), `H200`, 8 h timeout. Round 6's follow-up found two epochs no better
   at 27B on Qwen; this asks it again on a new base whose one-epoch trials are below v2.
