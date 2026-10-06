@@ -1322,11 +1322,43 @@ def test_local_predictor_scores_long_rows_through_the_shared_prefix(tiny_base, t
     assert shared == [True] and long["input_tokens"] == rows["input_tokens"] and "kernels" not in long and "kernels" not in rows
     for qid, z in rows["logits"].items():
         assert long["logits"][qid] == pytest.approx(z, abs=1e-5)
+    real_kernels, entered = P.long_row_kernels, []
+    monkeypatch.setattr(P, "long_row_kernels", lambda: (entered.append(True), real_kernels())[1])
+    evaluate_records([record], predictor, tmp_path / "long-cpu")
+    assert entered == []   # on the CPU a long row keeps the exact kernels
     monkeypatch.setattr(predictor, "device", "cuda"); monkeypatch.setattr(P, "sync", lambda device: None)   # the CUDA policy, on CPU tensors
     report, scored = evaluate_records([record], predictor, tmp_path / "long")
-    assert shared == [True, True] and [r["kernels"] for r in scored] == [P.LONG_ROW_KERNELS] * 2
+    assert entered == [True] and shared == [True, True, True] and [r["kernels"] for r in scored] == [P.LONG_ROW_KERNELS] * 2
     assert report["long_rows"] == {"count": 2, "records": 1, "kernels": [P.LONG_ROW_KERNELS], "threshold": ROW_PASS_TOKENS}
     assert [x for r in scored for x in r["logits"]] == pytest.approx([x for z in rows["logits"].values() for x in z.values()], abs=1e-5)
+    monkeypatch.setattr(P, "ROW_PASS_TOKENS", ROW_PASS_TOKENS)
+    short_report, short_rows = evaluate_records([record], predictor, tmp_path / "short-cuda")
+    assert entered == [True] and "long_rows" not in short_report and not any("kernels" in r for r in short_rows)   # under the threshold on CUDA: neither
+
+
+def test_long_row_kernels_repeat_fp32_keys_instead_of_grouped_attention(monkeypatch):
+    """kev.predictors.long_row_kernels: an fp32 SDPA call without a mask (a long unpadded state, kev.shared_prefix) repeats
+    its keys and values per query head instead of asking SDPA for `enable_gqa`, which only the flash and math kernels take
+    (flash has no fp32, so the call fell to math and its L x L scores: the small family's OOM on 32k-64k states). A bf16
+    call keeps `enable_gqa` (Kev-27B's flash kernel); outside the context nothing changes, and the output is the same
+    attention either way."""
+    from transformers.integrations import sdpa_attention as S
+    from kev.predictors import long_row_kernels
+    calls, real = [], torch.nn.functional.scaled_dot_product_attention
+    monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", lambda q, k, v, **kw: (calls.append((k.shape[1], kw.get("enable_gqa", False))), real(q, k, v, **kw))[1])
+    module = torch.nn.Module(); module.num_key_value_groups = 4
+    g = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, h, 24, 16, generator=g) for h in (8, 2, 2))
+    grouped = S.use_gqa_in_sdpa
+    out, _ = S.sdpa_attention_forward(module, q, k, v, None, is_causal=True)
+    with long_row_kernels():
+        repeated, _ = S.sdpa_attention_forward(module, q, k, v, None, is_causal=True)
+        S.sdpa_attention_forward(module, q.bfloat16(), k.bfloat16(), v.bfloat16(), None, is_causal=True)
+        S.sdpa_attention_forward(module, q, k, v, torch.ones(1, 1, 24, 24, dtype=torch.bool).tril())   # a mask: transformers repeats anyway
+    assert S.use_gqa_in_sdpa is grouped   # restored
+    S.sdpa_attention_forward(module, q, k, v, None, is_causal=True)
+    assert calls == [(2, True), (8, False), (2, True), (8, False), (2, True)]
+    assert torch.allclose(out, repeated, atol=1e-6)
 
 
 def test_benchmark_report_records_the_kernel_environment(tiny_base, tmp_path, monkeypatch):
@@ -2484,3 +2516,102 @@ def test_jev_counts_a_hosted_error_on_an_oversize_request_as_a_refusal(monkeypat
         j = P.JevPredictor("key", count_refusals=True, budget=100)
         with pytest.raises(raised): j(record)
         assert w.lines == lines and j.accounting()["refusals"] == refusals
+
+
+def test_release_assets_are_deterministic_and_refuse_placeholders_and_wrong_hashes(tmp_path):
+    """scripts/build_release_assets.py: a card with a {{PLACEHOLDER}} is refused before anything is downloaded; a staged
+    file whose sha256 differs from the spec is refused; the tarball is byte-identical when rebuilt from the same files
+    (mtime, owner and member order do not enter it), and SHA256SUMS.txt is in `shasum -a 256 -c` format."""
+    import hashlib, os, tarfile
+    from scripts.build_release_assets import card_problems, check_asset, deterministic_tar, stage, write_sums
+    root = tmp_path / "repo"; (root / "docs").mkdir(parents=True); (root / "runs").mkdir()
+    (root / "docs/card.md").write_text("Validated context: {{VALIDATED_CONTEXT_4B}}\n", encoding="utf-8")
+    (root / "runs/locked.json").write_text("{}", encoding="utf-8")
+    payload = b"adapter bytes"
+    asset = {"name": "kev-x", "repo": "r/kev-x", "revision": "abc", "card": "docs/card.md", "locked": "runs/locked.json",
+             "expect": {"adapter_model.safetensors": hashlib.sha256(payload).hexdigest()}}
+    assert card_problems((root / "docs/card.md").read_text(encoding="utf-8")) == ["{{VALIDATED_CONTEXT_4B}}"]
+    assert check_asset(asset, root) == ["kev-x: card docs/card.md still has {{VALIDATED_CONTEXT_4B}}"]
+    (root / "docs/card.md").write_text("Validated context: 16,384 tokens\n", encoding="utf-8")
+    assert check_asset(asset, root) == []
+
+    def download(content):
+        def fake(repo, revision, local_dir):
+            os.makedirs(local_dir, exist_ok=True)
+            for name, data in {"adapter_model.safetensors": content, "head.pt": b"head", "README.md": b"old card", ".gitattributes": b""}.items():
+                with open(os.path.join(local_dir, name), "wb") as f: f.write(data)
+        return fake
+
+    with pytest.raises(SystemExit, match="sha256"):
+        stage(asset, tmp_path / "w0", root, download(b"tampered"))
+    staged = stage(asset, tmp_path / "w1", root, download(payload))
+    assert sorted(p.name for p in staged.iterdir()) == ["README.md", "adapter_model.safetensors", "head.pt", "locked_test.json"]
+    assert (staged / "README.md").read_text(encoding="utf-8") == "Validated context: 16,384 tokens\n"
+    first = deterministic_tar(staged, tmp_path / "a.tar.gz", 1790812800)
+    os.utime(staged / "head.pt", (1, 1))
+    again = stage(asset, tmp_path / "w2", root, download(payload))
+    assert deterministic_tar(again, tmp_path / "b.tar.gz", 1790812800) == first
+    with tarfile.open(tmp_path / "a.tar.gz") as tar:
+        assert tar.getnames() == ["kev-x", "kev-x/README.md", "kev-x/adapter_model.safetensors", "kev-x/head.pt", "kev-x/locked_test.json"]
+        assert {m.mtime for m in tar.getmembers()} == {1790812800}
+    sums = write_sums({"b.tar.gz": "2" * 64, "a.tar.gz": first}, tmp_path)
+    assert sums.read_text(encoding="utf-8") == f"{first}  a.tar.gz\n{'2' * 64}  b.tar.gz\n"
+
+
+def test_release_assets_carry_the_release_date(tmp_path):
+    """scripts/build_release_assets.py stamps every member and the gzip header with midnight UTC of the spec's
+    release_date (SOURCE_DATE_EPOCH wins when set), the date is the only thing besides names and contents the bytes depend
+    on, and the extracted checkpoint serves that date (Kev 1.0's first tarballs used mtime 0: /v1/models said 1969-12-31)."""
+    import os, tarfile
+    from kev.checkpoint import Checkpoint, Meta, write_meta
+    from scripts.build_release_assets import deterministic_tar, source_date_epoch
+    day = source_date_epoch({"release_date": "2026-10-01"}, env={})
+    assert day == 1790812800                                                   # 2026-10-01T00:00:00Z
+    assert source_date_epoch({"release_date": "2026-10-01"}, env={"SOURCE_DATE_EPOCH": "1700000000"}) == 1700000000
+    src = tmp_path / "kev-x"; src.mkdir()
+    write_meta(src, Meta(base="b"))
+    (src / "adapter_model.safetensors").write_bytes(b"adapter")
+    first = deterministic_tar(src, tmp_path / "a.tar.gz", day)
+    os.utime(src / "head.pt", (5, 5))
+    assert deterministic_tar(src, tmp_path / "b.tar.gz", day) == first
+    assert deterministic_tar(src, tmp_path / "c.tar.gz", day + 86400) != first
+    assert int.from_bytes((tmp_path / "a.tar.gz").read_bytes()[4:8], "little") == day   # gzip header MTIME (RFC 1952)
+    with tarfile.open(tmp_path / "a.tar.gz") as tar:
+        assert {m.mtime for m in tar.getmembers()} == {day}
+        tar.extractall(tmp_path / "x", filter="data")
+    assert Checkpoint(tmp_path / "x" / "kev-x").release_date() == "2026-10-01"
+
+
+def test_release_date_skips_zeroed_mtimes_and_uses_utc(tmp_path, monkeypatch):
+    """Checkpoint.release_date for a local run: head.pt's UTC date when it is a real time; a pre-2000 head.pt (a zeroed
+    archive mtime) falls back to the newest real file time, and to "unknown" (a non-empty string the TypeSafe card
+    accepts) when there is none. A Hub id still reports the Hub commit date and only reads files when the Hub is down."""
+    import datetime, os, time
+    from types import SimpleNamespace
+    import huggingface_hub
+    from kev.checkpoint import Checkpoint, Meta, write_meta
+    write_meta(tmp_path, Meta(base="b"))
+    (tmp_path / "adapter_model.safetensors").write_bytes(b"adapter")
+    late = 1790895599                                                          # 2026-10-01T23:59:59Z
+    os.utime(tmp_path / "head.pt", (late, late)); os.utime(tmp_path / "adapter_model.safetensors", (0, 0))
+    ck = Checkpoint(tmp_path)
+    monkeypatch.setenv("TZ", "Asia/Tokyo"); time.tzset()                      # UTC+9: the local date is 2026-10-02
+    try:
+        assert ck.release_date() == "2026-10-01"
+    finally:
+        monkeypatch.undo(); time.tzset()
+    os.utime(tmp_path / "head.pt", (0, 0)); os.utime(tmp_path / "adapter_model.safetensors", (1790812800 - 86400, 1790812800 - 86400))
+    assert ck.release_date() == "2026-09-30"
+    os.utime(tmp_path / "adapter_model.safetensors", (0, 0))
+    assert ck.release_date() == "unknown"
+
+    calls = []
+    def model_info(repo, revision=None):
+        calls.append((repo, revision))
+        if repo == "down/kev": raise OSError("offline")
+        return SimpleNamespace(last_modified=datetime.datetime(2026, 9, 29, 12, tzinfo=datetime.timezone.utc))
+    monkeypatch.setattr(huggingface_hub, "HfApi", lambda: SimpleNamespace(model_info=model_info))
+    ck.requested = "jaredpalmer/kev-x@v1.0"
+    assert ck.release_date() == "2026-09-29" and calls == [("jaredpalmer/kev-x", "v1.0")]
+    ck.requested = "down/kev"
+    assert ck.release_date() == "unknown"                                      # offline: the cached files' rule
