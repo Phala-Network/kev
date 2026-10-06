@@ -278,6 +278,42 @@ def probs_one(model, enc, prefix, keep):
     return model.probs_and_prefix(enc) if keep else (model.probs(enc), None)
 
 
+# score elements (batch x heads x queries x keys) one inference attention call may hold before its queries run in chunks
+# (chunked_sdpa). Gemma 4 31B's global layers have 512-dim heads, past every fused SDPA kernel, so SDPA falls back to the
+# math kernel and materialises the scores: a 16k-token packed record asked for 7.9 GiB in one layer and ran out of memory.
+ATTENTION_SCORES = 1 << 28
+
+
+def chunked_sdpa(module, query, key, value, attention_mask, **kw):
+    """transformers' SDPA attention with the queries cut into chunks of at most ATTENTION_SCORES score elements at
+    inference. Each query's softmax is its own, so the chunks reproduce the one call; a call within the bound, and every
+    training pass, is the one call."""
+    from transformers.integrations.sdpa_attention import sdpa_attention_forward
+    b, h, q, _ = query.shape; kv = key.shape[2]
+    if module.training or b * h * q * kv <= ATTENTION_SCORES:
+        return sdpa_attention_forward(module, query, key, value, attention_mask, **kw)
+    causal = attention_mask is None and q > 1 and (kw.get("is_causal") if kw.get("is_causal") is not None else getattr(module, "is_causal", True))
+    c, out = max(1, ATTENTION_SCORES // (b * h * kv)), []
+    for s in range(0, q, c):
+        e = min(q, s + c)
+        if causal:   # the causal mask SDPA would apply, bottom-right aligned (queries are the last q of the kv positions)
+            m = (torch.arange(kv, device=query.device)[None, :] <= torch.arange(kv - q + s, kv - q + e, device=query.device)[:, None])[None, None]
+        else:
+            m = attention_mask if attention_mask is None or attention_mask.shape[-2] == 1 else attention_mask[:, :, s:e]
+        out.append(sdpa_attention_forward(module, query[:, :, s:e], key, value, m, **kw)[0])
+    return torch.cat(out, 1), None
+
+
+def _register_chunked_sdpa():
+    from transformers import AttentionInterface
+    from transformers.masking_utils import AttentionMaskInterface, sdpa_mask
+    AttentionInterface.register("kev_sdpa", chunked_sdpa)
+    AttentionMaskInterface.register("kev_sdpa", sdpa_mask)
+
+
+_register_chunked_sdpa()
+
+
 class DecisionModel(nn.Module):
     def __init__(self, name, tok, device, lora=None, revision=None, attn=None, head_dim=256, option_isolation=False, special_embeddings=False, lora_targets="all", dtype=torch.float32,
                  weights=None, direct_load=False):
@@ -301,6 +337,8 @@ class DecisionModel(nn.Module):
         self.hybrid = is_hybrid(self.lm.config)
         # sliding-window layers (Gemma 4) take the packed mask cut to their window, per layer type (_masks)
         self.sliding = sliding_window(self.lm.config)
+        # attention-only backbones run long states as one attention call over every position: SDPA's queries go in chunks
+        if not self.hybrid and attn == "sdpa": self.lm.set_attn_implementation("kev_sdpa")
         if self.hybrid and option_isolation: raise ValueError("option_isolation needs the packed mask; not available on hybrid backbones")
         self.option_isolation = option_isolation
         if lora:

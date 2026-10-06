@@ -690,6 +690,40 @@ def test_sliding_window_packed_matches_rows_and_prefix(tiny_gemma, monkeypatch):
     assert (unwindowed - packed).abs().max() > 1e-3
 
 
+
+def test_chunked_sdpa_reproduces_one_attention_call(tiny_gemma, monkeypatch):
+    """An attention-only backbone under SDPA runs kev_sdpa (chunked_sdpa): at inference a call past ATTENTION_SCORES runs
+    its queries in chunks, which reproduces the one call on the packed, row and prefix paths (sliding layers included)."""
+    from transformers import AutoTokenizer
+    from kev import model as M
+    from kev.model import DecisionModel
+    tok = AutoTokenizer.from_pretrained(tiny_gemma / "base")
+    m = DecisionModel(str(tiny_gemma / "base"), tok, "cpu", attn="sdpa").eval()
+    assert m.lm.config._attn_implementation == "kev_sdpa"
+    rec = {"state": "the customer is charged twice it is angry the customer", "questions": [
+        {"instr": "which team", "options": ["billing", "shipping", "refund"], "label": 0},
+        {"instr": "angry", "options": ["it", "is"], "label": 1}]}
+    enc = m.encode(tok, rec)
+    def run():
+        with torch.no_grad():
+            miss, prefix = m.probs_and_prefix(enc)
+            return [torch.cat([torch.softmax(z, -1) for z in m._readout(m.hidden(enc), enc)]),
+                    torch.cat([torch.softmax(z, -1) for z in m.forward_rows_batch([enc])[0]]),
+                    torch.cat(miss), torch.cat(m.probs_with_prefix(enc, prefix)), torch.cat(m.probs_with_prefix(enc, m.prefix(enc)))]
+    one = run()
+    calls = []
+    sdpa = M.chunked_sdpa
+    monkeypatch.setattr(M, "ATTENTION_SCORES", 2 * len(enc["ids"]))   # a few queries per chunk
+    from transformers import AttentionInterface
+    AttentionInterface.register("kev_sdpa", lambda *a, **k: (calls.append(a[1].shape[2]), sdpa(*a, **k))[1])
+    try:
+        chunked = run()
+    finally:
+        AttentionInterface.register("kev_sdpa", sdpa)
+    assert max(calls) > 1
+    for a, b in zip(one, chunked):
+        assert (a - b).abs().max() < 1e-5, (a, b)
+
 # --- full-weight training (kev.train --full_ft 1, kev.full_ft): a 2-layer Qwen3.5 with random weights, no downloads ----
 
 @pytest.fixture(scope="module")
