@@ -2964,6 +2964,12 @@ new parent option in `kev.rounds` with a test):
   Seed 1 lost its worker at step 1440/3128 (Modal "worker disappeared", 2026-10-05 23:02 UTC; the retry refused the
   existing trial directory, and a LoRA trial has no resume point). It is rerun unchanged, before any read, as study
   `r30-g31-lora2b` (`experiments/round30/lora-2ep-s1.json`, bound $51); arm `31b-lora2-s1` points at it.
+- Corrections before any read of the snapshot arms (2026-10-06): (1) the snapshot paths were copied from round 26 (steps
+  115/229/344 of 458); Gemma's re-filtered sft-v2-r26 gave 454 steps and the trial wrote steps 114/227/341, so arms
+  `31b-full-s25/s50/s75` point there (same 25/50/75% fractions). (2) Seed 0's agents-ood-v1, guardrails-ood-v1 and longdoc-v1
+  reads ran out of memory before writing rows (Gemma 4 31B's 512-dim global heads fall back to SDPA's math kernel; fixed by
+  `kev_sdpa`, queries chunked at inference) and were relaunched with the fix under the same names. The failed outputs on the
+  volume were removed by mistake; their failure.json records are in `runs/r30-oom-failures/`. No rows had been read.
 
 **Rule.** Round 24's audited rule and confirmation verbatim (breadth-v1 and the Kev panel primaries; tasksource-heldout
 guard with `runs/r24-private/tsheld-exclude.json`; short-state and CUAD long-document guards; calibration criteria; no

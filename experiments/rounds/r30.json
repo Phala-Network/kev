@@ -179,21 +179,21 @@
  },
  "arms": {
   "31b-full-s25": {
-   "checkpoint": "/runs/r30-g31-full/00-trial-0/snapshots/step-0000115/checkpoint",
+   "checkpoint": "/runs/r30-g31-full/00-trial-0/snapshots/step-0000114/checkpoint",
    "parent": "31b",
    "trained_on": [
     "evals/sft-v2-r26"
    ]
   },
   "31b-full-s50": {
-   "checkpoint": "/runs/r30-g31-full/00-trial-0/snapshots/step-0000229/checkpoint",
+   "checkpoint": "/runs/r30-g31-full/00-trial-0/snapshots/step-0000227/checkpoint",
    "parent": "31b",
    "trained_on": [
     "evals/sft-v2-r26"
    ]
   },
   "31b-full-s75": {
-   "checkpoint": "/runs/r30-g31-full/00-trial-0/snapshots/step-0000344/checkpoint",
+   "checkpoint": "/runs/r30-g31-full/00-trial-0/snapshots/step-0000341/checkpoint",
    "parent": "31b",
    "trained_on": [
     "evals/sft-v2-r26"
