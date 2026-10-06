@@ -2980,6 +2980,36 @@ Confirmation stages are not run in this round without Jared.
 $41.17, (a) $494.00 (H200:8 × 4 h × 3 attempts), (b) $100.24 (H200 × 8 h × 2 trials). Reads are spend-gated before each
 batch: launch only while (metered − baseline) + running bounds < $1,080 (10% reserve).
 
+**Readout (2026-10-06, `uv run python -m kev.rounds readout experiments/rounds/r30.json` -> `runs/r30-readout.txt`).** No
+candidate. Every arm is below Kev-27B v2 on the Kev panel primary, so no guard can promote one. Paired against v2,
+record-clustered, pp (90% intervals):
+
+| arm | Kev panel | breadth-v1 | breadth index | tasksource-heldout | hard-v1 | Kev without hard | short-state acc | SemIf (report) |
+|---|---|---|---|---|---|---|---|---|
+| `31b-full` (final) | -1.6 [-2.6, -0.5] | +0.3 [-0.8, +1.4] | +0.7 [-0.5, +1.9] | -1.2 [-2.7, +0.3] | -4.7 [-6.7, -2.8] | -0.0 [-1.2, +1.2] | +0.5 [-0.7, +1.8] | -2.1 [-6.2, +1.4] |
+| `31b-full-s75` | -1.9 [-3.0, -0.9] | +0.3 [-0.8, +1.4] | +0.7 [-0.5, +1.9] | -1.6 [-3.2, -0.1] | -4.7 [-6.6, -2.8] | -0.6 [-1.9, +0.7] | +0.3 [-0.9, +1.6] | -2.1 [-6.2, +1.4] |
+| `31b-full-s50` | -2.9 [-4.0, -1.8] | -0.2 [-1.3, +0.9] | +0.0 [-1.2, +1.2] | -2.0 [-3.6, -0.4] | -6.3 [-8.5, -4.2] | -1.3 [-2.6, -0.1] | -0.1 [-1.4, +1.2] | -2.1 [-6.2, +1.4] |
+| `31b-full-s25` | -6.6 [-7.8, -5.4] | -3.2 [-4.8, -1.7] | -3.0 [-4.5, -1.6] | -7.8 [-10.0, -5.8] | -12.8 [-15.2, -10.5] | -3.6 [-5.1, -2.2] | -2.5 [-4.1, -1.0] | -4.2 [-9.0, +0.7] |
+| `31b-lora2-s0` | -8.1 [-9.3, -6.8] | -1.6 [-2.8, -0.4] | -0.9 [-2.2, +0.4] | -4.4 [-6.2, -2.5] | -16.7 [-19.3, -14.1] | -4.0 [-5.3, -2.7] | +0.8 [-0.4, +2.1] | -7.6 [-13.2, -2.8] |
+| `31b-lora2-s1` | -8.1 [-9.4, -6.8] | -0.8 [-2.0, +0.4] | -0.5 [-1.8, +0.8] | -3.3 [-5.2, -1.5] | -16.3 [-19.0, -13.7] | -4.2 [-5.6, -2.9] | -0.5 [-1.8, +0.9] | -6.2 [-11.1, -2.1] |
+
+Calibration: Kev panel ECE within +-0.01 of v2 for every arm; breadth ECE +0.009 to +0.024 (the full-weight arms' breadth index
+ECE interval excludes 0); tasksource-heldout all-families ECE +0.055 for both LoRA seeds. guardrails-ood-v1 objective (report
+only): full -0.021, s75 -0.023, s50 -0.026, s25 -0.073, LoRA s0 -0.196 / s1 -0.217, v2 -0.019.
+
+What it says. v2's full-weight recipe closes most of the gap on Gemma: the final checkpoint ties v2 everywhere except hard-v1
+(-4.7) and so the Kev panel (-1.6); the gain is monotone in steps (s25 < s50 < s75 < final), so a longer run might close it
+further, but this round does not show that. Two-epoch LoRA is no better than the one-epoch trials on hard (-16) and
+stays far below full weight; round 6's two-epoch negative holds on this base.
+
+Not read. The CUAD/long-document guard (longdoc-v1) and agents-ood-v1 were stopped (Jared, 2026-10-06): the primary
+already fixed the decision. Under `kev_sdpa`, long Gemma states are slow (agents-ood: about 60 of 373 records in 2.5 h on
+one H200; longdoc: about 50 records per 15 min), so neither would have finished inside the 4 h read timeout. Their
+partial `predictions.jsonl` stay on the volume, never pulled. Making long Gemma reads fast (a fused kernel for 512-dim
+heads, or chunking keys too) is a prerequisite for any Gemma release.
+
+Spend. Metered $863.67 at the readout, $498 over the $365.65 baseline, inside the $1,200 cap.
+
 ## Gemma 4 31B, report only (2026-10-05)
 
 Development reads of the two `runs/gemma4-31b-it-2` trials (google/gemma-4-31B-it@842da37, v7 recipe, LoRA r16, one epoch, lr 5e-5; seeds 0 and 1), one `::benchmarks` call per trial, results in `runs/g31it-s{0,1}-<suite>` (transfer-v4 dev is the trial's own transfer read). Each Gemma trial is served at the temperature fitted on its own development rows (s0 1.782, s1 1.447); Kev-27B v1 (`runs/r6-27b-v2/01-trial-1`) at its fitted 1.382; Kev-27B v2 (`runs/release/kev-27b-r23*`, reads `runs/r23-27b-k-w85-*`) at round 23's registered pool temperature 1.32. Panel exclusions as round 24's rule (breadth: routerbench, cfcolor, humicroedit, chessbench; devtools: flakeflagger, commitpackft_type; transfer: emotion; the two codereviewer drops). Deltas are Gemma minus reference, accuracy in pp, `kev.metrics.paired_bootstrap` (micro, record-clustered, 2000 resamples, seed 0), on the records both sides scored. No test partition was read. Not a round: nothing here selects or ships a model.
