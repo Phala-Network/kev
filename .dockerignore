@@ -1,0 +1,12 @@
+# Dockerfile-specific context filter: retain only measured runtime/build inputs.
+**
+!kev/
+!kev/**
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!phala/
+!phala/**
+**/__pycache__/
+**/*.pyc
